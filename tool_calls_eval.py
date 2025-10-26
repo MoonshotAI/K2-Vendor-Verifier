@@ -274,6 +274,8 @@ class ToolCallsValidator:
             for task in asyncio.as_completed(tasks):
                 try:
                     res = await task
+                    with megfile.smart_open(self.output_file, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(res, ensure_ascii=False) + "\n")
                     self.results.append(res)
                 except Exception as e:
                     logger.error(f"Task failed: {e}")
@@ -281,11 +283,6 @@ class ToolCallsValidator:
                     pbar.update(1)
 
         self.results.sort(key=lambda r: r["data_index"])
-
-        # Save results
-        with megfile.smart_open(self.output_file, "w", encoding="utf-8") as f:
-            for r in self.results:
-                f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
         # Compute summary
         self.compute_summary()
