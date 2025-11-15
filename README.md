@@ -11,10 +11,11 @@ To mitigate these problems, we launch K2 Vendor Verifier to monitor and enhance 
 
 We hope K2VV can help ensuring that everyone can access a consistent and high-performing Kimi K2 model.
 
+## K2-thinking  Evaluation Results
 
-## Evaluation Results
-
-**Test Time**: 2025-10-23
+**Test Time**: 2025-11-15
+- temperature=1.0
+- max_tokens=64000
 
 <table>
   <thead>
@@ -32,7 +33,128 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
   </thead>
   <tbody>
     <tr>
-      <td rowspan="18">kimi-k2-0905-preview</td>
+      <td rowspan="16">kimi-k2-thinking</td>
+      <td><a href="https://platform.moonshot.ai/">MoonshotAI</a></td>
+      <td>-</td>
+      <td>1958</td>
+      <td>1958</td>
+      <td>100.00%</td>
+    </tr>
+    <tr>
+      <td><a href="https://platform.moonshot.ai/">Moonshot AI Turbo</a></td>
+      <td rowspan="11">>=73%</td>
+      <td>1984</td>
+      <td>1984</td>
+      <td>100.00%</td>
+    </tr>
+    <tr>
+      <td><a href="https://cloud.infini-ai.com/">InfiniAI</a></td>
+      <td>1827</td>
+      <td>1825</td>
+      <td>99.89%</td>
+    </tr>
+    <tr>
+      <td><a href="https://openrouter.ai/provider/siliconflow">SiliconFlow</a></td>
+      <td>2119</td>
+      <td>2097</td>
+      <td>98.96%</td>
+    </tr>
+    <tr>
+      <td><a href="https://openrouter.ai/provider/gmicloud">GMICloud</a></td>
+      <td>1850</td>
+      <td>1775</td>
+      <td>95.95%</td>
+    </tr>
+    <tr>
+      <td><a href="https://openrouter.ai/provider/atlas-cloud">AtlasCloud</a></td>
+      <td>1878</td>
+      <td>1798</td>
+      <td>95.74%</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/sgl-project/sglang">SGLang</a></td>
+      <td>1874</td>
+      <td>1790</td>
+      <td>95.52%</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/vllm-project/vllm">vLLM</a></td>
+      <td>2128</td>
+      <td>1856</td>
+      <td>87.22%</td>
+    </tr>
+    <tr>
+      <td><a href="https://openrouter.ai/provider/parasail">Parasail</a></td>
+      <td>2108</td>
+      <td>1837</td>
+      <td>87.14%</td>
+    </tr>
+    <tr>
+      <td><a href="https://openrouter.ai/provider/deepinfra">DeepInfra</a></td>
+      <td>2071</td>
+      <td>1800</td>
+      <td>86.91%</td>
+    </tr>
+    <tr>
+      <td><a href="https://cloud.google.com/vertex-ai">GoogleVertex</a></td>
+      <td>1945</td>
+      <td>1668</td>
+      <td>85.76%</td>
+    </tr>
+    <tr>
+      <td><a href="https://openrouter.ai/provider/together">Together</a></td>
+      <td>1893</td>
+      <td>1602</td>
+      <td>84.63%</td>
+    </tr>
+    <tr>
+      <td><a href="https://openrouter.ai/provider/novita">NovitaAI</a></td>
+      <td>72.22%</td>
+      <td>1778</td>
+      <td>1715</td>
+      <td>96.46%</td>
+    </tr>
+    <tr>
+      <td><a href="https://openrouter.ai/provider/chutes">Chutes</a></td>
+      <td>68.10%</td>
+      <td>3657</td>
+      <td>3037</td>
+      <td>83.05%</td>
+    </tr>
+    <tr>
+      <td><a href="https://openrouter.ai/provider/fireworks">Fireworks</a></td>
+      <td>67.38%</td>
+      <td>1494</td>
+      <td>1494</td>
+      <td>100.00%</td>
+    </tr>
+  </tbody>
+</table>
+
+##### We ran the official API multiple times to test the fluctuation of `tool_call_f1`. The lowest score was **75.81%**, and the average was **76%**. Given the inherent randomness of the model, we believe that an `tool_call_f1` score above **73%** is acceptable and can be used as a reference.
+
+## K2 0905 Evaluation Results
+
+**Test Time**: 2025-11-15
+- temperature=0.6
+
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">Model Name</th>
+      <th rowspan="2">provider</th>
+      <th rowspan="2">ToolCall-Trigger Similarity</th>
+      <th colspan="3" style="text-align: center;">ToolCall-Schema Accuracy</th>
+    </tr>
+    <tr>
+      <th>count_finish_reason_tool_calls</th>
+      <th>count_successful_tool_call</th>
+      <th>schema_accuracy</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="16">kimi-k2-0905-preview</td>
       <td><a href="https://platform.moonshot.ai/">MoonshotAI</a></td>
       <td>-</td>
       <td>1274</td>
@@ -42,39 +164,45 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
     <tr>
       <td><a href="https://platform.moonshot.ai/">Moonshot AI Turbo</a></td>
       <td rowspan="13">>=80%</td>
-      <td>1296</td>
-      <td>1296</td>
+      <td>1398</td>
+      <td>1398</td>
       <td>100.00%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/deepinfra">DeepInfra</a></td>
-      <td>1405</td>
-      <td>1405</td>
+      <td>1365</td>
+      <td>1365</td>
+      <td>100.00%</td>
+    </tr>
+    <tr>
+      <td><a href="https://openrouter.ai/provider/fireworks">Fireworks</a></td>
+      <td>1453</td>
+      <td>1453</td>
       <td>100.00%</td>
     </tr>
     <tr>
       <td><a href="https://cloud.infini-ai.com/">Infinigence</a></td>
-      <td>1249</td>
-      <td>1249</td>
+      <td>1257</td>
+      <td>1257</td>
       <td>100.00%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/novita">NovitaAI</a></td>
-      <td>1263</td>
-      <td>1263</td>
+      <td>1299</td>
+      <td>1299</td>
       <td>100.00%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/siliconflow">SiliconFlow</a></td>
-      <td>1280</td>
-      <td>1276</td>
-      <td>99.69%</td>
+      <td>1305</td>
+      <td>1302</td>
+      <td>99.77%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/chutes">Chutes</a></td>
-      <td>1225</td>
-      <td>1187</td>
-      <td>96.90%</td>
+      <td>1271</td>
+      <td>1229</td>
+      <td>96.70%</td>
     </tr>
     <tr>
       <td><a href="https://github.com/vllm-project/vllm">vLLM</a></td>
@@ -89,61 +217,47 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
       <td>73.13%</td>
     </tr>
     <tr>
-      <td><a href="https://openrouter.ai/provider/ppio">PPIO</a></td>
-      <td>1294</td>
-      <td>945</td>
-      <td>73.03%</td>
-    </tr>
-    <tr>
-      <td><a href="https://openrouter.ai/provider/atlas-cloud">AtlasCloud</a></td>
-      <td>1272</td>
-      <td>925</td>
-      <td>72.72%</td>
+      <td><a href="https://www.volcengine.com/">Volc</a></td>
+      <td>1330</td>
+      <td>969</td>
+      <td>72.86%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/baseten">Baseten</a></td>
-      <td>1363</td>
-      <td>982</td>
-      <td>72.05%</td>
+      <td>1243</td>
+      <td>901</td>
+      <td>72.49%</td>
+    </tr>
+    <tr>
+      <td><a href="https://openrouter.ai/provider/atlas-cloud">AtlasCloud</a></td>
+      <td>1277</td>
+      <td>925</td>
+      <td>72.44%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/together">Together</a></td>
-      <td>1260</td>
-      <td>900</td>
-      <td>71.43%</td>
-    </tr>
-    <tr>
-      <td><a href="https://www.volcengine.com/">Volc</a></td>
-      <td>1344</td>
-      <td>962</td>
-      <td>71.58%</td>
-    </tr>
-    <tr>
-      <td><a href="https://openrouter.ai/provider/fireworks">Fireworks</a></td>
-      <td>79.68%</td>
-      <td>1443</td>
-      <td>1443</td>
-      <td>100.00%</td>
+      <td>1266</td>
+      <td>911</td>
+      <td>71.96%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/groq">Groq</a></td>
-      <td>68.21%</td>
-      <td>1016</td>
-      <td>1016</td>
+      <td>69.52%</td>
+      <td>1042</td>
+      <td>1042</td>
       <td>100.00%</td>
     </tr>
     <tr>
       <td><a href="https://nebius.ai/">Nebius</a></td>
-      <td>48.59%</td>
-      <td>636</td>
-      <td>549</td>
-      <td>86.32%</td>
+      <td>50.60%</td>
+      <td>644</td>
+      <td>544</td>
+      <td>84.47%</td>
     </tr>
   </tbody>
 </table>
 
 ##### We ran the official API multiple times to test the fluctuation of `tool_call_f1`. The lowest score was **82.71%**, and the average was **84%**. Given the inherent randomness of the model, we believe that an `tool_call_f1` score above **80%** is acceptable and can be used as a reference.
-
 
 ### Evaluation Metrics
 
@@ -177,15 +291,20 @@ We test toolcall's response over a set of 4,000 requests. Each provider's respon
 
 K2 vendors are periodically evaluated. If you are not on the list and would like to be included, feel free to contact us.
 
-**Sample Data**: We have provided detailed sample data in samples.jsonl.
+**Sample Data**: Detailed samples and MoonshotAI results are available in `evaluation-dataset/tool-calls/` (50% of the test set).
 
 ## Suggestions to Vendors
 
 1. **Use the Correct Versions**  
-Some vendors may not meet the requirements due to using incorrect versions. Here are the recommended versions:
-   - [vllm v0.11.0](https://github.com/vllm-project/vllm/releases/tag/v0.11.0)
-   - [sglang v0.5.3rc0](https://github.com/sgl-project/sglang/releases/tag/v0.5.3rc0)
-   - [moonshotai/Kimi-K2-Instruct-0905](https://huggingface.co/moonshotai/Kimi-K2-Instruct-0905) (commit: 94a4053eb8863059dd8afc00937f054e1365abbd)
+Some vendors may not meet the requirements due to using incorrect versions. We recommend using the following versions and newer versions:
+- K2-0905:
+    - [vllm v0.11.0](https://github.com/vllm-project/vllm/releases/tag/v0.11.0)
+    - [sglang v0.5.3rc0](https://github.com/sgl-project/sglang/releases/tag/v0.5.3rc0)
+    - [moonshotai/Kimi-K2-Instruct-0905](https://huggingface.co/moonshotai/Kimi-K2-Instruct-0905) (commit: 94a4053eb8863059dd8afc00937f054e1365abbd)
+- K2-thinking: 
+    - [vllm v0.11.1rc6](https://github.com/vllm-project/vllm/releases/tag/v0.11.1rc6)
+    - [sglang v0.5.5.post2](https://github.com/sgl-project/sglang/releases/tag/v0.5.5.post2)
+    - [moonshotai/Kimi-K2-Thinking latest](https://huggingface.co/moonshotai/Kimi-K2-Thinking)
 
 2. **Rename Tool Call IDs**  
 The Kimi-K2 model expects all tool call IDs in historical messages to follow the format `functions.func_name:idx`. However, previous test cases may contain malformed tool IDs like `serach:0`*, which could mislead Kimi-K2 into generating incorrect tool call IDs, resulting in parsing failures.   

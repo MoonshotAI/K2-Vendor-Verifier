@@ -11,4 +11,5 @@ dependencies = [
     "megfile>=4.2.4",
     "openai>=1.108.1",
     "tqdm>=4.67.1",
+    "transformers>=4.57.1",
 ]
