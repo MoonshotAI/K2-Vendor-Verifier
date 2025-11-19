@@ -21,7 +21,8 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
   <thead>
     <tr>
       <th rowspan="2">Model Name</th>
-      <th rowspan="2">provider</th>
+      <th rowspan="2">Provider</th>
+      <th rowspan="2">Api Source</th>
       <th rowspan="2">ToolCall-Trigger Similarity</th>
       <th colspan="3" style="text-align: center;">ToolCall-Schema Accuracy</th>
     </tr>
@@ -33,8 +34,9 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
   </thead>
   <tbody>
     <tr>
-      <td rowspan="16">kimi-k2-thinking</td>
+      <td rowspan="17">kimi-k2-thinking</td>
       <td><a href="https://platform.moonshot.ai/">MoonshotAI</a></td>
+      <td>https://platform.moonshot.ai</td>
       <td>-</td>
       <td>1958</td>
       <td>1958</td>
@@ -42,73 +44,92 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
     </tr>
     <tr>
       <td><a href="https://platform.moonshot.ai/">Moonshot AI Turbo</a></td>
-      <td rowspan="11">>=73%</td>
+      <td>https://platform.moonshot.ai</td>
+      <td rowspan="12">>=73%</td>
       <td>1984</td>
       <td>1984</td>
       <td>100.00%</td>
     </tr>
     <tr>
+      <td><a href="https://fireworks.ai/">Fireworks</a></td>
+      <td>https://fireworks.ai</td>
+      <td>1703</td>
+      <td>1703</td>
+      <td>100.00%</td>
+    </tr>
+    <tr>
       <td><a href="https://cloud.infini-ai.com/">InfiniAI</a></td>
+      <td>https://cloud.infini-ai.com</td>
       <td>1827</td>
       <td>1825</td>
       <td>99.89%</td>
     </tr>
     <tr>
-      <td><a href="https://openrouter.ai/provider/siliconflow">SiliconFlow</a></td>
+      <td><a href="https://siliconflow.cn/">SiliconFlow</a></td>
+      <td>https://siliconflow.cn</td>
       <td>2119</td>
       <td>2097</td>
       <td>98.96%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/gmicloud">GMICloud</a></td>
+      <td>https://openrouter.ai</td>
       <td>1850</td>
       <td>1775</td>
       <td>95.95%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/atlas-cloud">AtlasCloud</a></td>
+      <td>https://openrouter.ai</td>
       <td>1878</td>
       <td>1798</td>
       <td>95.74%</td>
     </tr>
     <tr>
       <td><a href="https://github.com/sgl-project/sglang">SGLang</a></td>
+      <td>https://github.com/sgl-project/sglang</td>
       <td>1874</td>
       <td>1790</td>
       <td>95.52%</td>
     </tr>
     <tr>
       <td><a href="https://github.com/vllm-project/vllm">vLLM</a></td>
+      <td>https://github.com/vllm-project/vllm</td>
       <td>2128</td>
       <td>1856</td>
       <td>87.22%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/parasail">Parasail</a></td>
+      <td>https://openrouter.ai</td>
       <td>2108</td>
       <td>1837</td>
       <td>87.14%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/deepinfra">DeepInfra</a></td>
+      <td>https://openrouter.ai</td>
       <td>2071</td>
       <td>1800</td>
       <td>86.91%</td>
     </tr>
     <tr>
-      <td><a href="https://cloud.google.com/vertex-ai">GoogleVertex</a></td>
+      <td><a href="https://openrouter.ai/provider/google-vertex">GoogleVertex</a></td>
+      <td>https://openrouter.ai</td>
       <td>1945</td>
       <td>1668</td>
       <td>85.76%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/together">Together</a></td>
+      <td>https://openrouter.ai</td>
       <td>1893</td>
       <td>1602</td>
       <td>84.63%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/novita">NovitaAI</a></td>
+      <td>https://openrouter.ai</td>
       <td>72.22%</td>
       <td>1778</td>
       <td>1715</td>
@@ -116,6 +137,7 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/chutes">Chutes</a></td>
+      <td>https://openrouter.ai</td>
       <td>68.10%</td>
       <td>3657</td>
       <td>3037</td>
@@ -123,6 +145,7 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/fireworks">Fireworks</a></td>
+      <td>https://openrouter.ai</td>
       <td>67.38%</td>
       <td>1494</td>
       <td>1494</td>
@@ -142,7 +165,8 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
   <thead>
     <tr>
       <th rowspan="2">Model Name</th>
-      <th rowspan="2">provider</th>
+      <th rowspan="2">Provider</th>
+      <th rowspan="2">Api Source</th>
       <th rowspan="2">ToolCall-Trigger Similarity</th>
       <th colspan="3" style="text-align: center;">ToolCall-Schema Accuracy</th>
     </tr>
@@ -156,6 +180,7 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
     <tr>
       <td rowspan="16">kimi-k2-0905-preview</td>
       <td><a href="https://platform.moonshot.ai/">MoonshotAI</a></td>
+      <td>https://platform.moonshot.ai</td>
       <td>-</td>
       <td>1274</td>
       <td>1274</td>
@@ -163,6 +188,7 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
     </tr>
     <tr>
       <td><a href="https://platform.moonshot.ai/">Moonshot AI Turbo</a></td>
+      <td>https://platform.moonshot.ai</td>
       <td rowspan="13">>=80%</td>
       <td>1398</td>
       <td>1398</td>
@@ -170,78 +196,91 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/deepinfra">DeepInfra</a></td>
+      <td>https://openrouter.ai</td>
       <td>1365</td>
       <td>1365</td>
       <td>100.00%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/fireworks">Fireworks</a></td>
+      <td>https://openrouter.ai</td>
       <td>1453</td>
       <td>1453</td>
       <td>100.00%</td>
     </tr>
     <tr>
       <td><a href="https://cloud.infini-ai.com/">Infinigence</a></td>
+      <td>https://cloud.infini-ai.com</td>
       <td>1257</td>
       <td>1257</td>
       <td>100.00%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/novita">NovitaAI</a></td>
+      <td>https://openrouter.ai</td>
       <td>1299</td>
       <td>1299</td>
       <td>100.00%</td>
     </tr>
     <tr>
-      <td><a href="https://openrouter.ai/provider/siliconflow">SiliconFlow</a></td>
+      <td><a href="https://siliconflow.cn/">SiliconFlow</a></td>
+      <td>https://siliconflow.cn</td>
       <td>1305</td>
       <td>1302</td>
       <td>99.77%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/chutes">Chutes</a></td>
+      <td>https://openrouter.ai</td>
       <td>1271</td>
       <td>1229</td>
       <td>96.70%</td>
     </tr>
     <tr>
       <td><a href="https://github.com/vllm-project/vllm">vLLM</a></td>
+      <td>https://github.com/vllm-project/vllm</td>
       <td>1325</td>
       <td>1007</td>
       <td>76.00%</td>
     </tr>
     <tr>
       <td><a href="https://github.com/sgl-project/sglang">SGLang</a></td>
+      <td>https://github.com/sgl-project/sglang</td>
       <td>1269</td>
       <td>928</td>
       <td>73.13%</td>
     </tr>
     <tr>
       <td><a href="https://www.volcengine.com/">Volc</a></td>
+      <td>https://www.volcengine.com</td>
       <td>1330</td>
       <td>969</td>
       <td>72.86%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/baseten">Baseten</a></td>
+      <td>https://openrouter.ai</td>
       <td>1243</td>
       <td>901</td>
       <td>72.49%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/atlas-cloud">AtlasCloud</a></td>
+      <td>https://openrouter.ai</td>
       <td>1277</td>
       <td>925</td>
       <td>72.44%</td>
     </tr>
     <tr>
       <td><a href="https://openrouter.ai/provider/together">Together</a></td>
+      <td>https://openrouter.ai</td>
       <td>1266</td>
       <td>911</td>
       <td>71.96%</td>
     </tr>
     <tr>
-      <td><a href="https://openrouter.ai/provider/groq">Groq</a></td>
+      <td><a href="https://groq.com/">Groq</a></td>
+      <td>https://groq.com</td>
       <td>69.52%</td>
       <td>1042</td>
       <td>1042</td>
@@ -249,6 +288,7 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
     </tr>
     <tr>
       <td><a href="https://nebius.ai/">Nebius</a></td>
+      <td>https://nebius.ai</td>
       <td>50.60%</td>
       <td>644</td>
       <td>544</td>
