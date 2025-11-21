@@ -17,6 +17,7 @@ import os
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import megfile
@@ -29,8 +30,8 @@ from transformers import AutoTokenizer
 DEFAULT_CONCURRENCY = 5
 DEFAULT_TIMEOUT = 600
 DEFAULT_MAX_RETRIES = 3
-DEFAULT_OUTPUT_FILE = "results.jsonl"
-DEFAULT_SUMMARY_FILE = "summary.json"
+DEFAULT_OUTPUT_FILE = "results/results.jsonl"
+DEFAULT_SUMMARY_FILE = "results/summary.json"
 
 # Role constants
 ROLE_INPUT = "_input"
@@ -209,6 +210,18 @@ class ToolCallsValidator:
             )
         else:
             self.tokenizer = None
+
+        # Ensure output directory exists
+        output_dir = Path(self.output_file).parent
+        if output_dir and not output_dir.exists():
+            output_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created output directory: {output_dir}")
+
+        # Ensure summary directory exists
+        summary_dir = Path(self.summary_file).parent
+        if summary_dir and not summary_dir.exists():
+            summary_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created summary directory: {summary_dir}")
 
         # Log configuration
         logger.info(f"Model: {self.model}")

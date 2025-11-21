@@ -361,18 +361,35 @@ K2 vendors are periodically evaluated. If you are not on the list and would like
 3. **Add Guided Encoding**
    Large language models generate text token-by-token according to probability; they have no built-in mechanism to enforce a hard JSON schema. Even with careful prompting, the model may omit fields, add extra ones, or nest them incorrectly. So please add guided encoding to ensure the correct schema.
 
+## Development Workflow
+
+When making changes to the codebase, follow this development workflow to ensure code quality:
+
+```bash
+# Run linting and auto-fix issues
+uv run ruff check --fix
+
+# Run type checking
+uv run mypy src --pretty
+
+# Format code
+uv run ruff format
+```
+
+Execute these commands after every change to maintain code quality and consistency.
+
 ## Verify by yourself
 
 To run the evaluation tool with sample data, use the following command:
 
 ```bash
-python tool_calls_eval.py samples.jsonl \
+uv run kimi-vendor-verifier samples.jsonl \
     --model kimi-k2-0905-preview \
     --base-url https://api.moonshot.cn/v1 \
     --api-key YOUR_API_KEY \
     --concurrency 5 \
-    --output results.jsonl \
-    --summary summary.json
+    --output results/results.jsonl \
+    --summary results/summary.json
 ```
 
 - `samples.jsonl`: Path to the test set file in JSONL format
@@ -380,8 +397,8 @@ python tool_calls_eval.py samples.jsonl \
 - `--base-url`: API endpoint URL
 - `--api-key`: API key for authentication (or set OPENAI_API_KEY environment variable)
 - `--concurrency`: Maximum number of concurrent requests (default: 5)
-- `--output`: Path to save detailed results (default: results.jsonl)
-- `--summary`: Path to save aggregated summary (default: summary.json)
+- `--output`: Path to save detailed results (default: results/results.jsonl)
+- `--summary`: Path to save aggregated summary (default: results/summary.json)
 - `--timeout`: Per-request timeout in seconds (default: 600)
 - `--retries`: Number of retries on failure (default: 3)
 - `--extra-body`: Extra JSON body as string to merge into each request payload (e.g., '{"temperature":0.6}')
@@ -390,7 +407,7 @@ python tool_calls_eval.py samples.jsonl \
 For testing other providers via OpenRouter:
 
 ```bash
-python tool_calls_eval.py samples.jsonl \
+uv run kimi-vendor-verifier samples.jsonl \
     --model moonshotai/kimi-k2-0905 \
     --base-url https://openrouter.ai/api/v1 \
     --api-key YOUR_OPENROUTER_API_KEY \

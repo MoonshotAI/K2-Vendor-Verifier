@@ -59,15 +59,15 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output",
         type=str,
-        default="results.jsonl",
-        help="Path to save detailed results (default: results.jsonl)",
+        default="results/results.jsonl",
+        help="Path to save detailed results (default: results/results.jsonl)",
     )
 
     parser.add_argument(
         "--summary",
         type=str,
-        default="summary.json",
-        help="Path to save aggregated summary (default: summary.json)",
+        default="results/summary.json",
+        help="Path to save aggregated summary (default: results/summary.json)",
     )
 
     parser.add_argument(
