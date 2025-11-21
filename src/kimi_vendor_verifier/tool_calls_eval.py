@@ -751,7 +751,19 @@ class ToolCallsValidator:
         # Write to file
         async with self.file_lock:
             with megfile.smart_open(self.output_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(result, ensure_ascii=False) + "\n")
+                # Convert ValidationResult to dict for JSON serialization
+                result_dict = {
+                    "data_index": result.data_index,
+                    "request": result.request,
+                    "response": result.response,
+                    "status": result.status,
+                    "finish_reason": result.finish_reason,
+                    "tool_calls_valid": result.tool_calls_valid,
+                    "last_run_at": result.last_run_at,
+                    "duration_ms": result.duration_ms,
+                    "hash": result.hash,
+                }
+                f.write(json.dumps(result_dict, ensure_ascii=False) + "\n")
 
         # Update statistics
         async with self.stats_lock:
@@ -839,8 +851,20 @@ class ToolCallsValidator:
         Update summary file.
         """
         summary = self.compute_summary()
+        # Convert SummaryStatistics to dict for JSON serialization
+        summary_dict = {
+            "model": summary.model,
+            "success_count": summary.success_count,
+            "failure_count": summary.failure_count,
+            "finish_stop": summary.finish_stop,
+            "finish_tool_calls": summary.finish_tool_calls,
+            "finish_others": summary.finish_others,
+            "finish_others_detail": summary.finish_others_detail,
+            "schema_validation_error_count": summary.schema_validation_error_count,
+            "successful_tool_call_count": summary.successful_tool_call_count,
+        }
         with megfile.smart_open(self.summary_file, "w", encoding="utf-8") as f:
-            json.dump(summary, f, ensure_ascii=False, indent=4)
+            json.dump(summary_dict, f, ensure_ascii=False, indent=4)
 
     def compute_summary(self) -> SummaryStatistics:
         """
