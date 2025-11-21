@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -61,15 +62,13 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output",
         type=str,
-        default="results/results.jsonl",
-        help="Path to save detailed results (default: results/results.jsonl)",
+        help="Path to save detailed results (default: results/{model}/{timestamp}/results.jsonl)",
     )
 
     parser.add_argument(
         "--summary",
         type=str,
-        default="results/summary.json",
-        help="Path to save aggregated summary (default: results/summary.json)",
+        help="Path to save aggregated summary (default: results/{model}/{timestamp}/summary.json)",
     )
 
     parser.add_argument(
@@ -122,6 +121,48 @@ def create_parser() -> argparse.ArgumentParser:
         help="Maximum token count",
     )
 
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        default=True,
+        help="Enable verbose output (show details for successful requests too, default: True)",
+    )
+
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="Enable compact mode (hide details for successful requests)",
+    )
+
+    parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Enable quiet mode (hide live request summary lines)",
+    )
+
+    # Dataset control options
+    parser.add_argument(
+        "--sort-by",
+        type=str,
+        choices=[
+            "none",
+            "tool-calls-desc",
+            "tool-calls-asc",
+            "messages-desc",
+            "messages-asc",
+        ],
+        default="none",
+        help="Sort test cases before execution: 'tool-calls-desc' (most tools first), 'tool-calls-asc' (fewest tools first), 'messages-desc' (longest conversations first), 'messages-asc' (shortest first), 'none' (original order, default)",
+    )
+
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="Maximum number of test cases to run (useful for quick validation)",
+    )
+
     return parser
 
 
@@ -162,6 +203,10 @@ async def main_async(args: argparse.Namespace) -> None:
         tokenizer_model=args.tokenizer_model,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
+        verbose=args.verbose and not args.compact,
+        quiet=args.quiet,
+        sort_by=args.sort_by,
+        limit=args.limit,
     ) as validator:
         # Run validation
         await validator.validate_file(args.test_file)
@@ -177,6 +222,18 @@ def main() -> None:
     if not test_file_path.exists():
         print(f"Error: Test file not found: {args.test_file}", file=sys.stderr)
         sys.exit(1)
+
+    # Set default output paths with timestamp nesting if not provided
+    if not args.output or not args.summary:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        sanitized_model = args.model.replace("/", "_")
+        default_dir = Path(f"results/{sanitized_model}/{timestamp}")
+
+        if not args.output:
+            args.output = str(default_dir / "results.jsonl")
+
+        if not args.summary:
+            args.summary = str(default_dir / "summary.json")
 
     # Run the async main function
     try:

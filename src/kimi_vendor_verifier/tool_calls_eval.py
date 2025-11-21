@@ -5,40 +5,60 @@ Features:
 - Concurrent request processing
 - Incremental mode (rerun only failed requests)
 - Stream and non-stream responses
-- Real-time statistics updates
+- Real-time statistics updates, rich UI output
 - Support for both chat/completions and completions APIs
 """
 
-import argparse
 import asyncio
 import hashlib
 import json
 import os
+
+# Suppress transformers warning about missing DL frameworks
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+
 import re
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import megfile
+import megfile  # pyright: ignore[reportMissingTypeStubs]
 from jsonschema import ValidationError, validate
 from loguru import logger
 from openai import AsyncOpenAI
-from tqdm.asyncio import tqdm_asyncio
+
+# Rich imports for UI
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    ProgressColumn,
+    SpinnerColumn,
+    TaskID,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
+from rich.syntax import Syntax
+from rich.table import Table
+from rich.text import Text
 from transformers import AutoTokenizer
 
 from .models import (
+    ComplexityMetrics,
     FunctionCall,
     SummaryStatistics,
     ToolCall,
+    ToolStats,
     ValidationResult,
 )
 
 DEFAULT_CONCURRENCY = 5
 DEFAULT_TIMEOUT = 600
 DEFAULT_MAX_RETRIES = 3
-DEFAULT_OUTPUT_FILE = "results/results.jsonl"
-DEFAULT_SUMMARY_FILE = "results/summary.json"
 
 # Role constants
 ROLE_INPUT = "_input"
@@ -50,6 +70,25 @@ TOOL_CALLS_END = "<|tool_calls_section_end|>"
 TOOL_CALL_BEGIN = "<|tool_call_begin|>"
 TOOL_CALL_ARG_BEGIN = "<|tool_call_argument_begin|>"
 TOOL_CALL_END = "<|tool_call_end|>"
+
+
+class ChunksPerSecondColumn(ProgressColumn):
+    """Custom column to display chunks per second rate for streaming requests."""
+
+    def render(self, task):
+        """Render the chunks per second based on custom field."""
+        # Get total chunks from task fields
+        total_chunks = task.fields.get("total_chunks", 0)
+
+        # Calculate chunks per second: total_chunks / elapsed_time
+        if task.elapsed and task.elapsed > 0:
+            chunks_per_sec = total_chunks / task.elapsed
+        else:
+            chunks_per_sec = 0.0
+
+        if chunks_per_sec == 0:
+            return Text("-- chunks/s", style="progress.data.speed")
+        return Text(f"{chunks_per_sec:.1f} chunks/s", style="progress.data.speed")
 
 
 def extract_tool_call_info(tool_call_rsp: str) -> list[ToolCall]:
@@ -81,7 +120,7 @@ def extract_tool_call_info(tool_call_rsp: str) -> list[ToolCall]:
         rf"{re.escape(TOOL_CALL_END)}"
     )
 
-    tool_calls = []
+    tool_calls: list[ToolCall] = []
     for match in re.finditer(func_call_pattern, tool_calls_sections[0], re.DOTALL):
         function_id = match.group("tool_call_id")
         function_args = match.group("function_arguments")
@@ -133,10 +172,10 @@ class ToolCallsValidator:
         self,
         model: str,
         base_url: str,
+        output_file: str,
+        summary_file: str,
         api_key: str | None = None,
         concurrency: int = DEFAULT_CONCURRENCY,
-        output_file: str = DEFAULT_OUTPUT_FILE,
-        summary_file: str = DEFAULT_SUMMARY_FILE,
         timeout: int = DEFAULT_TIMEOUT,
         max_retries: int = DEFAULT_MAX_RETRIES,
         extra_body: dict[str, Any] | None = None,
@@ -145,25 +184,13 @@ class ToolCallsValidator:
         tokenizer_model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        verbose: bool = True,  # Default to verbose as requested
+        quiet: bool = False,
+        sort_by: str = "none",
+        limit: int | None = None,
     ):
         """
         Initialize validator.
-
-        Args:
-            model: Model name
-            base_url: API base URL
-            api_key: API key (optional, defaults to env var)
-            concurrency: Number of concurrent requests
-            output_file: Detailed results output file
-            summary_file: Aggregated summary output file
-            timeout: Request timeout in seconds
-            max_retries: Maximum retry attempts
-            extra_body: Extra request body parameters
-            incremental: Whether to enable incremental mode
-            use_raw_completions: Whether to use /v1/completions endpoint
-            tokenizer_model: Tokenizer model name for raw completions
-            temperature: Generation temperature
-            max_tokens: Maximum token count
         """
         # Validate parameters
         if not model or not model.strip():
@@ -195,10 +222,20 @@ class ToolCallsValidator:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.use_raw_completions = use_raw_completions
+        self.max_tokens = max_tokens
+        self.use_raw_completions = use_raw_completions
         self.tokenizer_model = tokenizer_model
+        # Default to verbose (detailed panels for all) unless quiet
+        self.verbose = verbose
+        self.quiet = quiet
+        self.sort_by = sort_by
+        self.limit = limit
 
         self.results: list[ValidationResult] = []
         self.finish_reason_stat: dict[str, int] = {}
+        self.progress: Progress | None = None
+        self.total_chunks: int = 0  # Track total streaming chunks across all requests
+        self.chunks_lock = asyncio.Lock()  # Lock for updating chunk count
 
         # Initialize OpenAI client
         self.client = AsyncOpenAI(
@@ -219,6 +256,9 @@ class ToolCallsValidator:
             )
         else:
             self.tokenizer = None
+
+        # Initialize rich console
+        self.console = Console()
 
         # Ensure output directory exists
         output_dir = Path(self.output_file).parent
@@ -247,23 +287,12 @@ class ToolCallsValidator:
     async def __aenter__(self):
         """
         Async context manager entry.
-
-        Returns:
-            Self for use in 'async with' statement
         """
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """
         Async context manager exit, cleanup resources.
-
-        Args:
-            exc_type: Exception type if an exception was raised
-            exc_val: Exception value if an exception was raised
-            exc_tb: Exception traceback if an exception was raised
-
-        Returns:
-            False to propagate exceptions
         """
         try:
             await self.client.close()
@@ -275,12 +304,6 @@ class ToolCallsValidator:
     def prepare_request(self, request: dict[str, Any]) -> dict[str, Any]:
         """
         Preprocess request, set model and parameters.
-
-        Args:
-            request: Raw request dictionary
-
-        Returns:
-            Processed request dictionary
         """
         req = request.copy()
 
@@ -317,15 +340,6 @@ class ToolCallsValidator:
     def read_jsonl(self, file_path: str) -> list[dict[str, Any]]:
         """
         Read test set file in JSONL format.
-
-        Args:
-            file_path: File path
-
-        Returns:
-            List of requests, each containing raw request, prepared request, and hash
-
-        Raises:
-            FileNotFoundError: If the test file does not exist
         """
         # Check file existence
         if not megfile.smart_exists(file_path):
@@ -353,17 +367,66 @@ class ToolCallsValidator:
                     logger.error(f"Error processing line {line_num}: {e}")
 
         logger.info(f"Successfully read {len(requests)} requests")
+
+        # Apply sorting if specified
+        if self.sort_by != "none":
+            requests = self._sort_requests(requests)
+
+        # Apply limit if specified
+        if self.limit is not None and self.limit > 0:
+            original_count = len(requests)
+            requests = requests[: self.limit]
+            logger.info(
+                f"Limited dataset from {original_count} to {len(requests)} requests"
+            )
+
+        return requests
+
+    def _sort_requests(self, requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        Sort requests based on sort_by parameter.
+
+        Args:
+            requests: List of request objects
+
+        Returns:
+            Sorted list of requests
+        """
+
+        def count_messages(req: dict[str, Any]) -> int:
+            """Count number of messages in request."""
+            messages = req.get("raw", {}).get("messages", [])
+            return len(messages) if messages else 0
+
+        def count_available_tools(req: dict[str, Any]) -> int:
+            """Count number of available tools in request."""
+            tools = req.get("raw", {}).get("tools", [])
+            return len(tools) if tools else 0
+
+        if self.sort_by == "tool-calls-desc":
+            # Sort by number of available tools (descending)
+            requests.sort(key=count_available_tools, reverse=True)
+            logger.info("Sorted requests by available tool count (most tools first)")
+        elif self.sort_by == "tool-calls-asc":
+            # Sort by number of available tools (ascending)
+            requests.sort(key=count_available_tools, reverse=False)
+            logger.info("Sorted requests by available tool count (fewest tools first)")
+        elif self.sort_by == "messages-desc":
+            requests.sort(key=count_messages, reverse=True)
+            logger.info(
+                "Sorted requests by message count (longest conversations first)"
+            )
+        elif self.sort_by == "messages-asc":
+            requests.sort(key=count_messages, reverse=False)
+            logger.info(
+                "Sorted requests by message count (shortest conversations first)"
+            )
+
         return requests
 
     def read_result_jsonl(self, file_path: str) -> list[dict[str, Any]]:
         """
         Read result file in JSONL format.
-
-        Args:
-            file_path: File path
-
-        Returns:
-            List of results
         """
         results = []
         with megfile.smart_open(file_path, "r", encoding="utf-8") as f:
@@ -377,21 +440,20 @@ class ToolCallsValidator:
                     logger.error(f"Parse error at line {line_num} in result file: {e}")
         return results
 
-    async def send_request(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    async def send_request(
+        self, request: dict[str, Any], log_cb: Any = None
+    ) -> tuple[str, dict[str, Any]]:
         """
         Send API request (supports both stream and non-stream).
-
-        Args:
-            request: Request parameters dictionary
-
-        Returns:
-            Tuple of (status, response dict), status is either "success" or "failed"
         """
         try:
             if request.get("stream", False):
-                return await self._handle_stream_request(request)
+                return await self._handle_stream_request(request, log_cb)
             else:
                 # Non-stream request
+                if log_cb:
+                    log_cb("Waiting for full response...")
+
                 if not self.use_raw_completions:
                     response = await self.client.chat.completions.create(
                         **request, extra_body=self.extra_body
@@ -406,18 +468,15 @@ class ToolCallsValidator:
             return "failed", {"error": str(e)}
 
     async def _handle_stream_request(
-        self, request: dict[str, Any]
+        self, request: dict[str, Any], log_cb: Any = None
     ) -> tuple[str, dict[str, Any]]:
         """
         Handle stream request.
-
-        Args:
-            request: Request parameters dictionary
-
-        Returns:
-            Tuple of (status, response dict)
         """
         try:
+            if log_cb:
+                log_cb("Initiating stream...")
+
             # Create stream request
             if not self.use_raw_completions:
                 stream = await self.client.chat.completions.create(
@@ -428,6 +487,9 @@ class ToolCallsValidator:
                     **request, extra_body=self.extra_body
                 )
 
+            if log_cb:
+                log_cb("Stream connected. receiving chunks...")
+
             # Initialize accumulation variables
             request_id = None
             created = None
@@ -435,9 +497,24 @@ class ToolCallsValidator:
             tool_calls: dict[int, dict[str, Any]] = {}
             finish_reason = None
             usage = None
+            chunk_count = 0
 
             # Process stream events
             async for event in stream:
+                chunk_count += 1
+                # Update global chunk counter and progress bar in real-time
+                async with self.chunks_lock:
+                    self.total_chunks += 1
+                    # Update progress bar every 10 chunks for smooth real-time feedback
+                    if self.progress and chunk_count % 10 == 0:
+                        # Find the task and update it with current chunk count
+                        for task_id in self.progress.task_ids:
+                            self.progress.update(
+                                task_id, total_chunks=self.total_chunks, refresh=True
+                            )
+
+                if log_cb and chunk_count % 20 == 0:
+                    log_cb(f"Streaming... ({chunk_count} chunks received)")
                 # Extract metadata
                 if hasattr(event, "id") and event.id:
                     request_id = event.id
@@ -446,7 +523,7 @@ class ToolCallsValidator:
 
                 # Check choices
                 if not hasattr(event, "choices") or not event.choices:
-                    logger.warning("Empty choices in stream event")
+                    # logger.warning("Empty choices in stream event")
                     continue
 
                 choice = event.choices[0]
@@ -475,18 +552,76 @@ class ToolCallsValidator:
 
             # Extract tool calls from text if using completions endpoint
             content_text = "".join(full_content)
+
+            # DEBUG OUTPUT: Show raw response and tool call detection logic
+            original_finish_reason = finish_reason  # Save original before modification
+
             if self.use_raw_completions:
+                # Show we're in raw completions mode
+                if log_cb:
+                    log_cb(
+                        "⚙️  Using raw completions mode - checking for tool call markers in response"
+                    )
+
+                # Show raw content preview
+                content_preview = (
+                    content_text[:500] if len(content_text) > 500 else content_text
+                )
+                if log_cb:
+                    log_cb(
+                        f"📄 Raw Response Content (first 500 chars):\n{content_preview}"
+                    )
+
+                # Check for tool call markers
+                has_markers = TOOL_CALLS_BEGIN in content_text
+                if log_cb:
+                    log_cb(f"🔍 Tool call markers detected: {has_markers}")
+                    if has_markers:
+                        log_cb(f"   ✓ Found '{TOOL_CALLS_BEGIN}' in response")
+                    else:
+                        log_cb(f"   ✗ No '{TOOL_CALLS_BEGIN}' found in response")
+
+                # Extract tool calls
                 extracted_tool_calls = extract_tool_call_info(content_text)
+
+                if log_cb:
+                    log_cb(
+                        f"🔧 extract_tool_call_info() returned: {len(extracted_tool_calls) if extracted_tool_calls else 0} tool calls"
+                    )
+
                 if extracted_tool_calls:
                     tool_calls = {
                         i: tc.__dict__ for i, tc in enumerate(extracted_tool_calls)
                     }
                     finish_reason = "tool_calls"
 
+                    if log_cb:
+                        log_cb("✅ Tool calls extracted successfully:")
+                        for i, tc in enumerate(extracted_tool_calls):
+                            log_cb(f"   Tool {i}: {tc.function.name}")
+                        log_cb(
+                            f"📝 Updated finish_reason: '{original_finish_reason}' → '{finish_reason}'"
+                        )
+                else:
+                    if log_cb:
+                        log_cb("⚠️  No tool calls extracted from response")
+                        log_cb(f"📝 finish_reason remains: '{finish_reason}'")
+            else:
+                # Show we're in chat completions mode
+                if log_cb:
+                    log_cb(
+                        "⚙️  Using chat/completions mode - tool calls should be structured"
+                    )
+                    if tool_calls:
+                        log_cb(
+                            f"✅ Received {len(tool_calls)} structured tool calls from API"
+                        )
+                    else:
+                        log_cb("ℹ️  No structured tool calls in API response")
+
             # Convert tool_calls to list of dicts for response format
-            tool_calls_list = (
-                [tc.__dict__ for tc in tool_calls.values()] if tool_calls else None
-            )
+            # entries in tool_calls.values() are already dicts
+            tool_calls_list = list(tool_calls.values()) if tool_calls else None
 
             # Construct response
             response = {
@@ -517,10 +652,6 @@ class ToolCallsValidator:
     ) -> None:
         """
         Accumulate tool call information from stream response.
-
-        Args:
-            delta_tool_calls: Delta tool calls list
-            tool_calls: Accumulated tool calls dictionary (will be modified)
         """
         for tc in delta_tool_calls:
             idx = tc.index if tc.index is not None else 0
@@ -553,13 +684,38 @@ class ToolCallsValidator:
         Returns:
             Result dictionary
         """
+
+        def live_log(msg: str):
+            if self.verbose and not self.quiet:
+                if self.progress:
+                    self.progress.console.print(msg)
+                else:
+                    self.console.print(msg)
+
+        # Live status: Queued
+        live_log(f"[dim]#{data_index} Queued...[/]")
+
         async with self.semaphore:
+            # Live status: Sending
+            live_log(f"[cyan]#{data_index} Sending Request...[/]")
+
             start_time = time.time()
-            status, response = await self.send_request(prepared_req["prepared"])
+
+            # Define scoped callback that prefixes ID
+            def request_logger(msg):
+                live_log(f"[dim]#{data_index} {msg}[/]")
+
+            status, response = await self.send_request(
+                prepared_req["prepared"], log_cb=request_logger
+            )
             duration_ms = int((time.time() - start_time) * 1000)
+
+            # Live status: Received
+            live_log(f"[blue]#{data_index} Received Response ({duration_ms}ms)[/]")
 
             finish_reason: str | None = None
             tool_calls_valid: bool | None = None
+            validation_errors: list[str] = []
 
             # Extract finish_reason and validate tool calls
             if response and "choices" in response and response["choices"]:
@@ -568,12 +724,21 @@ class ToolCallsValidator:
 
                 # Validate parameters if tool call
                 if finish_reason == "tool_calls":
-                    tools = prepared_req["raw"].get("tools", [])
-                    tool_calls = choice.get("message", {}).get("tool_calls", [])
+                    # Handle case where tools might be explicitly None
+                    tools = prepared_req["raw"].get("tools") or []
+                    # Handle case where tool_calls might be explicitly None
+                    tool_calls = choice.get("message", {}).get("tool_calls") or []
                     if tool_calls:
-                        tool_calls_valid = all(
-                            self.validate_tool_call(tc, tools) for tc in tool_calls
+                        # Live status: Validating
+                        live_log(
+                            f"[yellow]#{data_index} Validating {len(tool_calls)} tool calls...[/]"
                         )
+
+                        results_and_errors = [
+                            self.validate_tool_call(tc, tools) for tc in tool_calls
+                        ]
+                        tool_calls_valid = all(r[0] for r in results_and_errors)
+                        validation_errors = [r[1] for r in results_and_errors if r[1]]
 
             return ValidationResult(
                 data_index=data_index,
@@ -582,6 +747,7 @@ class ToolCallsValidator:
                 status=status,
                 finish_reason=finish_reason,
                 tool_calls_valid=tool_calls_valid,
+                validation_errors=validation_errors,
                 last_run_at=datetime.now().isoformat(),
                 duration_ms=duration_ms,
                 hash=prepared_req["hash"],
@@ -589,7 +755,7 @@ class ToolCallsValidator:
 
     def validate_tool_call(
         self, tool_call: dict[str, Any], tools: list[dict[str, Any]]
-    ) -> bool:
+    ) -> tuple[bool, str | None]:
         """
         Validate tool call arguments against JSON Schema.
 
@@ -598,7 +764,7 @@ class ToolCallsValidator:
             tools: Available tools list
 
         Returns:
-            Whether validation passed
+            Tuple of (is_valid, error_message)
         """
         try:
             tool_name = tool_call["function"]["name"]
@@ -614,8 +780,9 @@ class ToolCallsValidator:
             )
 
             if not schema:
-                logger.warning(f"No schema found for tool '{tool_name}'")
-                return False
+                msg = f"No schema found for tool '{tool_name}'"
+                logger.warning(msg)
+                return False, msg
 
             # Parse arguments (may be string or dict)
             args = tool_call["function"]["arguments"]
@@ -623,26 +790,28 @@ class ToolCallsValidator:
                 try:
                     args = json.loads(args)
                 except json.JSONDecodeError as e:
-                    logger.warning(
-                        f"JSON parse failed for tool '{tool_name}' arguments: {e}"
-                    )
-                    return False
+                    msg = f"JSON parse failed for tool '{tool_name}' arguments: {e}"
+                    logger.warning(msg)
+                    return False, msg
 
             # Validate using jsonschema
             validate(instance=args, schema=schema)
-            return True
+            return True, None
 
         except ValidationError as e:
-            logger.warning(
-                f"Schema validation failed for tool '{tool_name}': {e.message}"
-            )
-            return False
+            # e.message contains the specific validation error
+            msg = f"Schema validation failed for tool '{tool_name}': {e.message}"
+            # Also e.instance is useful but message is usually enough
+            logger.warning(msg)
+            return False, msg
         except KeyError as e:
-            logger.warning(f"Tool call format error, missing field: {e}")
-            return False
+            msg = f"Tool call format error, missing field: {e}"
+            logger.warning(msg)
+            return False, msg
         except Exception as e:
-            logger.warning(f"Unexpected error during validation: {e}")
-            return False
+            msg = f"Unexpected error during validation: {e}"
+            logger.warning(msg)
+            return False, msg
 
     async def validate_file(self, file_path: str) -> None:
         """
@@ -678,9 +847,9 @@ class ToolCallsValidator:
         await self.update_summary_file()
 
         # Prepare tasks to process
-        tasks = []
         self.results = []
 
+        # First pass: load existing successful results in incremental mode
         for req in all_requests:
             h = req["hash"]
             data_index = req["data_index"]
@@ -697,23 +866,58 @@ class ToolCallsValidator:
                         status=r.get("status", ""),
                         finish_reason=r.get("finish_reason"),
                         tool_calls_valid=r.get("tool_calls_valid"),
+                        validation_errors=r.get("validation_errors", []),
                         last_run_at=r.get("last_run_at", ""),
                         duration_ms=r.get("duration_ms", 0),
                         hash=r.get("hash", ""),
                     )
                     self.results.append(validation_result)
+
+        # Initialize rich progress object (assigned to self for access in process_request)
+        # Note: We use a custom RequestsPerSecondColumn that calculates rate ourselves
+        self.progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            ChunksPerSecondColumn(),  # Custom column that calculates chunks/s
+            console=self.console,
+        )
+
+        # Second pass: build list of coroutines for concurrent processing
+        tasks = []
+        for req in all_requests:
+            h = req["hash"]
+            data_index = req["data_index"]
+
+            # Incremental mode: skip successful requests
+            if self.incremental and h in existing_hash_map:
+                r = existing_hash_map[h]
+                if isinstance(r, dict) and r.get("status") == "success":
                     continue
 
+            # Append the coroutine (not started yet)
             tasks.append(self.process_request(req, data_index))
 
         if not tasks:
             logger.info("All requests already processed successfully, no need to rerun")
+            await self.update_summary_file()
             return
 
         logger.info(f"Preparing to process {len(tasks)} requests")
 
         # Process all tasks concurrently
-        with tqdm_asyncio(total=len(tasks), desc="Processing", unit="req") as pbar:
+        with self.progress:
+            task_id = self.progress.add_task(
+                f"[cyan]Processing {len(tasks)} requests...",
+                total=len(tasks),
+                total_chunks=0,  # Initialize chunks field for real-time updates
+            )
+
+            completed_count = 0
             for task in asyncio.as_completed(tasks):
                 try:
                     res = await task
@@ -725,12 +929,19 @@ class ToolCallsValidator:
                         )
 
                     self.results.append(res)
-                    # Save result immediately and update stats
-                    await self.save_result_and_update_stats(res)
+                    completed_count += 1
+                    # Save result immediately and update stats/UI (pass completed_count)
+                    await self.save_result_and_update_stats(
+                        res, self.progress, task_id, completed_count
+                    )
                 except Exception as e:
                     logger.error(f"Task execution failed: {e}")
-                finally:
-                    pbar.update(1)
+                    completed_count += 1
+                    # Still update progress even on error
+                    self.progress.update(task_id, completed=completed_count)
+
+        # Cleanup progress reference
+        self.progress = None
 
         # Final processing: deduplicate and sort results
         await self.deduplicate_and_sort_results()
@@ -738,15 +949,28 @@ class ToolCallsValidator:
         # Final summary update
         await self.update_summary_file()
 
+        # Export failures for re-testing
+        await self.export_failures()
+
+        # Print final summary table
+        self.print_final_summary()
+
+        # Print tool stats heat map
+        self.print_tool_stats()
+
         logger.info(f"Results saved to: {self.output_file}")
         logger.info(f"Summary saved to: {self.summary_file}")
 
-    async def save_result_and_update_stats(self, result: ValidationResult) -> None:
+    async def save_result_and_update_stats(
+        self,
+        result: ValidationResult,
+        progress: Progress | None = None,
+        task_id: TaskID | None = None,
+        completed_count: int | None = None,
+    ) -> None:
         """
         Save single result to file and update statistics in real-time.
-
-        Args:
-            result: Result dictionary
+        Allows reporting failures to UI.
         """
         # Write to file
         async with self.file_lock:
@@ -759,24 +983,368 @@ class ToolCallsValidator:
                     "status": result.status,
                     "finish_reason": result.finish_reason,
                     "tool_calls_valid": result.tool_calls_valid,
+                    "validation_errors": result.validation_errors,
                     "last_run_at": result.last_run_at,
                     "duration_ms": result.duration_ms,
                     "hash": result.hash,
                 }
                 f.write(json.dumps(result_dict, ensure_ascii=False) + "\n")
 
-        # Update statistics
-        async with self.stats_lock:
-            summary = self.compute_summary()
-            logger.info(
-                f"[Stats] Total: {summary.success_count + summary.failure_count}, "
-                f"Success: {summary.success_count}, "
-                f"Failed: {summary.failure_count}, "
-                f"Stop: {summary.finish_stop}, "
-                f"ToolCalls: {summary.finish_tool_calls}, "
-                f"ToolCallValid: {summary.successful_tool_call_count}, "
-                f"ToolCallInvalid: {summary.schema_validation_error_count}"
+        # Update statistics (UI)
+        summary = self.compute_summary()
+
+        # Enhanced descriptive logging with clear success/failure indicators
+        total_requests = summary.success_count + summary.failure_count
+        network_failures = summary.failure_count
+
+        # Build detailed status message
+        status_parts = [
+            f"📊 [PROGRESS UPDATE #{result.data_index}]",
+            f"Total Processed: {total_requests}",
+        ]
+
+        # Network/API level failures (these are BAD)
+        if network_failures > 0:
+            status_parts.append(
+                f"❌ Network/API Failures: {network_failures} (These requests failed to complete)"
             )
+
+        # Successful API responses
+        status_parts.append(f"✅ Successful API Responses: {summary.success_count}")
+
+        # Break down finish reasons
+        if summary.finish_stop > 0:
+            status_parts.append(
+                f"   📝 Normal Text Responses (finish='stop'): {summary.finish_stop}"
+            )
+
+        if summary.finish_tool_calls > 0:
+            status_parts.append(
+                f"   🔧 Tool Call Attempts (finish='tool_calls'): {summary.finish_tool_calls}"
+            )
+
+            # Show validation results for tool calls
+            if summary.successful_tool_call_count > 0:
+                status_parts.append(
+                    f"     ✅ VALID Tool Calls (passed schema validation): {summary.successful_tool_call_count}"
+                )
+
+            if summary.schema_validation_error_count > 0:
+                status_parts.append(
+                    f"     ❌ INVALID Tool Calls (FAILED schema validation): {summary.schema_validation_error_count}"
+                )
+                status_parts.append(
+                    "        ⚠️  Check detailed panels above for validation errors!"
+                )
+
+        # Log with newlines for readability
+        logger.info("\n" + "\n".join(status_parts))
+
+        if progress and task_id is not None and completed_count is not None:
+            count_total = summary.success_count + summary.failure_count
+            count_success = summary.success_count
+            count_failed = summary.failure_count
+            count_stop = summary.finish_stop
+            count_tool_calls = summary.finish_tool_calls
+            count_valid = summary.successful_tool_call_count
+            count_invalid = summary.schema_validation_error_count
+
+            # Show ALL tracked stats like the original output
+            desc = (
+                f"[cyan]Total: {count_total}[/cyan] | "
+                f"[green]Success: {count_success}[/green] | "
+                f"[red]Failed: {count_failed}[/red] | "
+                f"[yellow]Stop: {count_stop}[/yellow] | "
+                f"[magenta]ToolCalls: {count_tool_calls}[/magenta] | "
+                f"[green]ToolCallValid: {count_valid}[/green] | "
+                f"[red]ToolCallInvalid: {count_invalid}[/red]"
+            )
+            # Update with description, completed count, and total chunks for chunks/s calculation
+            progress.update(
+                task_id,
+                description=desc,
+                completed=completed_count,
+                total_chunks=self.total_chunks,
+                refresh=True,
+            )
+
+        # Print Live Status for EVERY request (unless quiet)
+        if not self.quiet:
+            self.print_result_summary(result, progress)
+
+        # Report Validation Details (ONLY for successful API responses)
+        # Don't show validation panel for network/API failures - there's nothing to validate!
+        if result.status == "success":
+            # Check if this is a validation failure
+            has_failure = bool(
+                result.tool_calls_valid is False
+                or (result.validation_errors and len(result.validation_errors) > 0)
+            )
+
+            # Only show panel if:
+            # 1. There was a validation failure, OR
+            # 2. There were actual tool calls that were validated (tool_calls_valid is True)
+            # DO NOT show panel when tool_calls_valid is None (no tool calls to validate)
+            has_tool_calls_to_show = result.tool_calls_valid is not None
+
+            should_show_panel = has_failure or (
+                has_tool_calls_to_show and self.verbose and not self.quiet
+            )
+
+            if should_show_panel:
+                self.print_failure_report(result, progress, is_failure=has_failure)
+
+    def print_result_summary(
+        self, result: ValidationResult, progress: Progress | None = None
+    ) -> None:
+        """
+        Print a detailed summary with request/response info for debugging.
+        Shows EXPECTED vs ACTUAL for clear debugging.
+        """
+        # Create a detailed panel for each request
+        details = []
+
+        # Request summary - show what tools were provided
+        req_tools = result.request.get("tools", [])
+        req_tool_names = [t["function"]["name"] for t in req_tools] if req_tools else []
+
+        # Request context
+        details.append(Text("━━━ REQUEST ━━━", style="bold cyan"))
+
+        # Show available tools
+        if req_tool_names:
+            details.append(
+                Text(
+                    f"Available Tools: {', '.join(req_tool_names)} ({len(req_tools)} tools)",
+                    style="cyan",
+                )
+            )
+        else:
+            details.append(
+                Text(
+                    "Available Tools: None",
+                    style="dim cyan",
+                )
+            )
+
+        # Response
+        details.append(Text("\n━━━ ACTUAL ━━━", style="bold magenta"))
+
+        # Response summary based on status
+        if result.status != "success":
+            error_msg = (
+                result.response.get("error", "Unknown error")
+                if result.response
+                else "Unknown error"
+            )
+            details.append(
+                Text(f"❌ API REQUEST FAILED: {error_msg}", style="bold red")
+            )
+            details.append(
+                Text("Result: Network/API error prevented completion", style="red")
+            )
+
+        elif result.finish_reason == "stop":
+            if result.response and "choices" in result.response:
+                content = (
+                    result.response["choices"][0].get("message", {}).get("content", "")
+                )
+                preview = content[:100] + "..." if len(content) > 100 else content
+                details.append(
+                    Text("Response Type: Text (finish_reason='stop')", style="yellow")
+                )
+                details.append(Text(f"Content Preview: {preview}", style="dim"))
+
+        elif result.finish_reason == "tool_calls":
+            # Tool call response
+            details.append(
+                Text(
+                    "Response Type: Tool Calls (finish_reason='tool_calls')",
+                    style="magenta",
+                )
+            )
+
+            if result.response and "choices" in result.response:
+                tcs = result.response["choices"][0]["message"].get("tool_calls") or []
+                details.append(Text(f"Tool Calls Made: {len(tcs)}", style="magenta"))
+
+                # Show validation result clearly
+                if result.tool_calls_valid is True:
+                    details.append(
+                        Text(
+                            "✅ VALIDATION: All tool calls are VALID",
+                            style="bold green",
+                        )
+                    )
+                elif result.tool_calls_valid is False:
+                    details.append(
+                        Text("❌ VALIDATION: Tool calls are INVALID", style="bold red")
+                    )
+                    if result.validation_errors:
+                        details.append(Text("Validation Errors:", style="red"))
+                        for err in result.validation_errors:
+                            details.append(Text(f"  • {err}", style="red"))
+
+                # Show each tool call
+                for i, tc in enumerate(tcs, 1):
+                    func_name = tc.get("function", {}).get("name", "unknown")
+                    func_args = tc.get("function", {}).get("arguments", "{}")
+                    # Parse args for display
+                    try:
+                        args_obj = (
+                            json.loads(func_args)
+                            if isinstance(func_args, str)
+                            else func_args
+                        )
+                        args_str = json.dumps(args_obj, ensure_ascii=False)
+                    except Exception:
+                        args_str = str(func_args)
+
+                    style = "green" if result.tool_calls_valid else "red"
+                    icon = "✓" if result.tool_calls_valid else "✗"
+                    details.append(
+                        Text(f"  {icon} Tool {i}: {func_name}({args_str})", style=style)
+                    )
+        else:
+            # Other finish reasons
+            details.append(
+                Text(
+                    f"Response Type: finish_reason='{result.finish_reason}'",
+                    style="yellow",
+                )
+            )
+            details.append(Text("⚠️  Unexpected finish_reason value", style="yellow"))
+
+        # Duration
+        details.append(Text(f"\nDuration: {result.duration_ms}ms", style="dim"))
+
+        # Determine panel style based on result
+        is_success = result.status == "success" and result.tool_calls_valid is not False
+        border_style = "green" if is_success else "red"
+        title_style = "bold green" if is_success else "bold red"
+
+        # Create panel
+        panel = Panel(
+            "\n".join([str(d) for d in details]),
+            title=f"[{title_style}]Request #{result.data_index}[/{title_style}]",
+            border_style=border_style,
+            padding=(0, 1),
+        )
+
+        if progress:
+            progress.console.print(panel)
+        else:
+            self.console.print(panel)
+
+    def print_failure_report(
+        self,
+        result: ValidationResult,
+        progress: Progress | None = None,
+        is_failure: bool = True,
+    ) -> None:
+        """
+        Print a detailed report to the console.
+        """
+        # We extract the tools needed
+        tools = result.request.get("tools", [])
+
+        # We extract the model's tool calls
+        response_msg = {}
+        if (
+            result.response
+            and "choices" in result.response
+            and result.response["choices"]
+        ):
+            response_msg = result.response["choices"][0].get("message", {})
+
+        tool_calls = response_msg.get("tool_calls") or []
+
+        # Construct details header
+        subtitle_text = Text()
+        if is_failure:
+            if result.validation_errors:
+                for err in result.validation_errors:
+                    subtitle_text.append(f"❌ {err}\n", style="bold red")
+            else:
+                subtitle_text.append(
+                    "❌ Tool call validation failed (reason unknown)\n",
+                    style="bold red",
+                )
+        else:
+            subtitle_text.append("✅ Validation Successful\n", style="bold green")
+
+        # Syntax highlighted JSON for input tools (schema)
+        relevant_schemas = []
+        called_tool_names = [tc.get("function", {}).get("name") for tc in tool_calls]
+        for t in tools:
+            if t["function"]["name"] in called_tool_names:
+                relevant_schemas.append(t)
+
+        schema_json = json.dumps(relevant_schemas, indent=2, ensure_ascii=False)
+        schema_syntax = Syntax(schema_json, "json", theme="monokai", word_wrap=True)
+
+        # Syntax highlighted JSON for actual output
+        output_json = json.dumps(tool_calls, indent=2, ensure_ascii=False)
+        output_syntax = Syntax(output_json, "json", theme="monokai", word_wrap=True)
+
+        # Create a grid or table for comparison
+        grid = Table.grid(expand=True)
+        grid.add_column(ratio=1)
+        grid.add_column(ratio=1)
+
+        grid.add_row(
+            Text("Expected Schema (Relevant Tools)", style="bold cyan"),
+            Text("Actual Tool Calls Output", style="bold magenta"),
+        )
+        grid.add_row(schema_syntax, output_syntax)
+
+        title_style = "bold red" if is_failure else "bold green"
+        border_style = "red" if is_failure else "green"
+        title_text = "Validation Failure" if is_failure else "Validation Success"
+
+        panel = Panel(
+            grid,
+            title=f"[{title_style}]{title_text} (Index: {result.data_index})[/]",
+            subtitle=subtitle_text,
+            border_style=border_style,
+            padding=(1, 2),
+        )
+
+        if progress:
+            progress.console.print(panel)
+        else:
+            self.console.print(panel)
+
+    def print_final_summary(self) -> None:
+        """
+        Print the final summary table.
+        """
+        summary = self.compute_summary()
+
+        table = Table(title="Validation Summary", border_style="blue")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Count", justify="right", style="green")
+
+        table.add_row(
+            "Total Requests", str(summary.success_count + summary.failure_count)
+        )
+        table.add_row("Successful Requests", str(summary.success_count))
+        table.add_row("Failed Requests (Network/API)", str(summary.failure_count))
+        table.add_section()
+        table.add_row("Finish Reason: stop", str(summary.finish_stop))
+        table.add_row("Finish Reason: tool_calls", str(summary.finish_tool_calls))
+
+        for reason, count in summary.finish_others_detail.items():
+            table.add_row(f"Finish Reason: {reason}", str(count))
+
+        table.add_section()
+        table.add_row("Valid Tool Calls", str(summary.successful_tool_call_count))
+        table.add_row(
+            "Invalid Tool Calls (Schema Error)",
+            f"[red]{summary.schema_validation_error_count}[/red]",
+        )
+
+        self.console.print(table)
 
     async def deduplicate_and_sort_results(self) -> None:
         """
@@ -790,12 +1358,10 @@ class ToolCallsValidator:
 
         all_results = self.read_result_jsonl(self.output_file)
         if not all_results:
-            logger.info("No results to process")
+            # logger.info("No results to process")
             return
 
-        logger.info(
-            f"Processing {len(all_results)} results for deduplication and sorting"
-        )
+        # logger.info(f"Processing {len(all_results)} results for deduplication and sorting")
 
         # Group by data_index and keep the latest one for each index
         results_by_index: dict[int, ValidationResult] = {}
@@ -808,6 +1374,7 @@ class ToolCallsValidator:
                 status=result_dict.get("status", ""),
                 finish_reason=result_dict.get("finish_reason"),
                 tool_calls_valid=result_dict.get("tool_calls_valid"),
+                validation_errors=result_dict.get("validation_errors", []),
                 last_run_at=result_dict.get("last_run_at", ""),
                 duration_ms=result_dict.get("duration_ms", 0),
                 hash=result_dict.get("hash", ""),
@@ -816,7 +1383,7 @@ class ToolCallsValidator:
             data_index = result.data_index
             last_run_at = result.last_run_at
             if last_run_at is None:
-                logger.warning(f"Result missing last_run_at: {result}")
+                # logger.warning(f"Result missing last_run_at: {result}")
                 continue
 
             # If this index is new, or this result is newer, keep it
@@ -831,9 +1398,7 @@ class ToolCallsValidator:
         deduplicated_results = list(results_by_index.values())
         deduplicated_results.sort(key=lambda x: x.data_index)
 
-        logger.info(
-            f"Deduplicated from {len(all_results)} to {len(deduplicated_results)} results"
-        )
+        # logger.info(f"Deduplicated from {len(all_results)} to {len(deduplicated_results)} results")
 
         # Rewrite the file with deduplicated and sorted results
         async with self.file_lock:
@@ -844,7 +1409,109 @@ class ToolCallsValidator:
         # Update self.results
         self.results = deduplicated_results  # This is already List[ValidationResult]
 
-        logger.info(f"Results deduplicated, sorted, and saved to: {self.output_file}")
+        # logger.info(f"Results deduplicated, sorted, and saved to: {self.output_file}")
+
+    def compute_tool_stats(self) -> dict[str, ToolStats]:
+        """
+        Compute per-tool statistics.
+
+        Returns:
+            Dictionary mapping tool names to ToolStats objects
+        """
+        tool_stats: dict[str, ToolStats] = {}
+
+        for result in self.results:
+            if result.status != "success":
+                continue
+
+            # Get actual tool calls
+            if not result.response or "choices" not in result.response:
+                continue
+
+            tool_calls = (
+                result.response["choices"][0].get("message", {}).get("tool_calls")
+            )
+            if not tool_calls:
+                continue
+
+            for tc in tool_calls:
+                tool_name = tc.get("function", {}).get("name", "unknown")
+
+                if tool_name not in tool_stats:
+                    tool_stats[tool_name] = ToolStats(tool_name=tool_name)
+
+                # Determine if this specific tool call was valid
+                if result.tool_calls_valid is True:
+                    tool_stats[tool_name].success_count += 1
+                else:
+                    tool_stats[tool_name].failure_count += 1
+                    # Add schema error if present
+                    if result.validation_errors:
+                        for err in result.validation_errors:
+                            if tool_name in err:
+                                tool_stats[tool_name].schema_errors.append(err)
+
+        return tool_stats
+
+    def compute_complexity_metrics(self) -> dict[str, ComplexityMetrics]:
+        """
+        Compute metrics grouped by request complexity.
+
+        Returns:
+            Dictionary mapping complexity types to ComplexityMetrics objects
+        """
+        metrics: dict[str, ComplexityMetrics] = {}
+
+        for result in self.results:
+            # Group by message count
+            msg_count = len(result.request.get("messages", []))
+            if msg_count <= 2:
+                msg_key = "1-2 messages"
+            elif msg_count <= 5:
+                msg_key = "3-5 messages"
+            elif msg_count <= 10:
+                msg_key = "6-10 messages"
+            else:
+                msg_key = "11+ messages"
+
+            if msg_key not in metrics:
+                metrics[msg_key] = ComplexityMetrics(complexity_type=msg_key)
+
+            metrics[msg_key].request_count += 1
+            metrics[msg_key].total_duration_ms += result.duration_ms
+
+        return metrics
+
+    async def export_failures(self) -> None:
+        """
+        Export failed cases to separate JSONL files for re-testing.
+        """
+        output_dir = Path(self.output_file).parent
+
+        # Export all failures
+        failures = [r for r in self.results if r.status != "success"]
+        if failures:
+            failures_file = output_dir / "failures.jsonl"
+            async with self.file_lock:
+                with megfile.smart_open(str(failures_file), "w", encoding="utf-8") as f:
+                    for r in failures:
+                        # Write the original request (from raw request data)
+                        f.write(json.dumps(r.request, ensure_ascii=False) + "\n")
+            logger.info(
+                f"Exported {len(failures)} network/API failures to {failures_file}"
+            )
+
+        # Export schema validation failures
+        schema_failures = [r for r in self.results if r.tool_calls_valid is False]
+        if schema_failures:
+            schema_file = output_dir / "schema_failures.jsonl"
+            async with self.file_lock:
+                with megfile.smart_open(str(schema_file), "w", encoding="utf-8") as f:
+                    for r in schema_failures:
+                        f.write(json.dumps(r.request, ensure_ascii=False) + "\n")
+            logger.info(
+                f"Exported {len(schema_failures)} schema failures to {schema_file}"
+            )
 
     async def update_summary_file(self) -> None:
         """
@@ -889,10 +1556,13 @@ class ToolCallsValidator:
                 summary.finish_stop += 1
             elif finish_reason == "tool_calls":
                 summary.finish_tool_calls += 1
-                if tool_calls_valid:
+                # Explicitly check True/False, not just truthy/falsy
+                # (tool_calls_valid can be None if no tool calls were validated)
+                if tool_calls_valid is True:
                     summary.successful_tool_call_count += 1
-                else:
+                elif tool_calls_valid is False:
                     summary.schema_validation_error_count += 1
+                # If None, don't count as either (no validation occurred)
             elif finish_reason:
                 summary.finish_others += 1
                 summary.finish_others_detail.setdefault(finish_reason, 0)
@@ -901,140 +1571,48 @@ class ToolCallsValidator:
         self.summary = summary
         return summary
 
+    def print_tool_stats(self) -> None:
+        """Print per-tool success rates (heat map)."""
+        tool_stats = self.compute_tool_stats()
 
-async def main() -> None:
-    """
-    Main function: parse command-line arguments and execute validation.
-    """
-    parser = argparse.ArgumentParser(
-        description=(
-            "LLM Tool Calls Validator\n\n"
-            "Validate LLM tool call functionality via HTTP API with concurrency support "
-            "and optional incremental re-run.\n"
-            "Each line in the test set file must be a complete LLM request body (JSON format)."
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-
-    parser.add_argument(
-        "file_path",
-        help="Test set file path (JSONL format)",
-    )
-
-    parser.add_argument(
-        "--base-url",
-        required=True,
-        help="API endpoint URL, e.g., https://api.moonshot.cn/v1",
-    )
-
-    parser.add_argument(
-        "--api-key", help="API key (can also be set via OPENAI_API_KEY env var)"
-    )
-
-    parser.add_argument(
-        "--model",
-        required=True,
-        help="Model name, e.g., kimi-k2-0905-preview",
-    )
-
-    parser.add_argument(
-        "--temperature",
-        type=float,
-        default=None,
-        help="Generation temperature (overrides request temperature)",
-    )
-
-    parser.add_argument(
-        "--max-tokens",
-        type=int,
-        default=None,
-        help="Maximum token count (overrides request max_tokens)",
-    )
-
-    parser.add_argument(
-        "--extra-body",
-        type=str,
-        help="Extra request body parameters (JSON string)",
-    )
-
-    parser.add_argument(
-        "--concurrency",
-        type=int,
-        default=DEFAULT_CONCURRENCY,
-        help=f"Maximum concurrent requests (default: {DEFAULT_CONCURRENCY})",
-    )
-
-    parser.add_argument(
-        "--output",
-        default=DEFAULT_OUTPUT_FILE,
-        help=f"Detailed results output file path (default: {DEFAULT_OUTPUT_FILE})",
-    )
-    parser.add_argument(
-        "--summary",
-        default=DEFAULT_SUMMARY_FILE,
-        help=f"Aggregated summary output file path (default: {DEFAULT_SUMMARY_FILE})",
-    )
-
-    parser.add_argument(
-        "--timeout",
-        type=int,
-        default=DEFAULT_TIMEOUT,
-        help=f"Request timeout in seconds (default: {DEFAULT_TIMEOUT})",
-    )
-
-    parser.add_argument(
-        "--retries",
-        type=int,
-        default=DEFAULT_MAX_RETRIES,
-        help=f"Number of retries on failure (default: {DEFAULT_MAX_RETRIES})",
-    )
-
-    parser.add_argument(
-        "--incremental",
-        action="store_true",
-        help="Incremental mode: only rerun failed or new requests, preserve successful results",
-    )
-
-    parser.add_argument(
-        "--use_raw_completions",
-        action="store_true",
-        help="Use /v1/completions endpoint (requires tokenizer)",
-    )
-
-    parser.add_argument(
-        "--tokenizer-model",
-        type=str,
-        help="Tokenizer model name for raw completions",
-    )
-
-    args = parser.parse_args()
-
-    extra_body = {}
-    if args.extra_body:
-        try:
-            extra_body = json.loads(args.extra_body)
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse --extra-body JSON: {e}")
+        if not tool_stats:
             return
 
-    async with ToolCallsValidator(
-        model=args.model,
-        base_url=args.base_url,
-        api_key=args.api_key,
-        concurrency=args.concurrency,
-        output_file=args.output,
-        summary_file=args.summary,
-        timeout=args.timeout,
-        max_retries=args.retries,
-        extra_body=extra_body,
-        incremental=args.incremental,
-        use_raw_completions=args.use_raw_completions,
-        tokenizer_model=args.tokenizer_model,
-        temperature=args.temperature,
-        max_tokens=args.max_tokens,
-    ) as validator:
-        await validator.validate_file(args.file_path)
+        table = Table(title="Tool Call Success Rates", border_style="blue")
+        table.add_column("Tool Name", style="cyan")
+        table.add_column("Success", justify="right", style="green")
+        table.add_column("Failed", justify="right", style="red")
+        table.add_column("Success Rate", justify="right")
+        table.add_column("", width=20)  # Bar column
+
+        # Sort by success rate
+        sorted_tools = sorted(
+            tool_stats.values(), key=lambda x: x.success_rate, reverse=True
+        )
+
+        for stats in sorted_tools:
+            rate = stats.success_rate
+            bar_length = int(rate / 5)  # 20 char = 100%
+            bar = "█" * bar_length + "░" * (20 - bar_length)
+
+            # Color code the rate
+            if rate >= 95:
+                rate_style = "green"
+            elif rate >= 80:
+                rate_style = "yellow"
+            else:
+                rate_style = "red"
+
+            table.add_row(
+                stats.tool_name,
+                str(stats.success_count),
+                str(stats.failure_count),
+                f"[{rate_style}]{rate:.1f}%[/]",
+                bar,
+            )
+
+        self.console.print(table)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    pass

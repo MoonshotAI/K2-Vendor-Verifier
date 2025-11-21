@@ -104,9 +104,10 @@ class ValidationResult:
     status: str
     finish_reason: str | None
     tool_calls_valid: bool | None
-    last_run_at: str | None
-    duration_ms: int
-    hash: str
+    validation_errors: list[str] | None = None
+    last_run_at: str | None = None
+    duration_ms: int = 0
+    hash: str = ""
 
 
 @dataclass
@@ -129,3 +130,49 @@ class ToolCallInfo:
     """Extracted tool call information from text."""
 
     tool_calls: list[ToolCall]
+
+
+@dataclass
+class FailureCategory:
+    """Categorization of a validation failure."""
+
+    category: str  # "wrong_tool", "missing_tool", "extra_tool", "schema_error"
+    description: str
+    expected_tools: list[str]
+    actual_tools: list[str]
+    count: int = 1
+
+
+@dataclass
+class ToolStats:
+    """Statistics for a specific tool."""
+
+    tool_name: str
+    success_count: int = 0
+    failure_count: int = 0
+    schema_errors: list[str] = field(default_factory=lambda: [])
+
+    @property
+    def total_calls(self) -> int:
+        return self.success_count + self.failure_count
+
+    @property
+    def success_rate(self) -> float:
+        if self.total_calls == 0:
+            return 0.0
+        return (self.success_count / self.total_calls) * 100
+
+
+@dataclass
+class ComplexityMetrics:
+    """Metrics grouped by request complexity."""
+
+    complexity_type: str  # e.g., "1-2 messages", "0 tools"
+    request_count: int = 0
+    total_duration_ms: int = 0
+
+    @property
+    def avg_duration_ms(self) -> int:
+        if self.request_count == 0:
+            return 0
+        return self.total_duration_ms // self.request_count
