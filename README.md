@@ -1,4 +1,8 @@
-# K2 Vendor Verifier
+# K2 Vendor Verifier (Improved)
+
+## Changes
+
+This is a proper modern refactor, feature extension, style improvement, and usability improvement of the original/underlying K2 Tool Call Verifier system.
 
 ## What's K2VV
 
@@ -11,9 +15,10 @@ To mitigate these problems, we launch K2 Vendor Verifier to monitor and enhance 
 
 We hope K2VV can help ensuring that everyone can access a consistent and high-performing Kimi K2 model.
 
-## K2-thinking  Evaluation Results
+## K2-thinking Evaluation Results
 
 **Test Time**: 2025-11-15
+
 - temperature=1.0
 - max_tokens=64000
 
@@ -159,6 +164,7 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
 ## K2 0905 Evaluation Results
 
 **Test Time**: 2025-11-15
+
 - temperature=0.6
 
 <table>
@@ -302,28 +308,28 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
 ### Evaluation Metrics
 
 #### ToolCall-Trigger Similarity
+
 We use `tool_call_f1` to determine whether the model deployment is correct.
 
-| Label / Metric | Formula | Meaning |
-| --- | --- | --- |
-| `TP` (True Positive) | — | Both model & official have `finish_reason == "tool_calls"`. |
-| `FP` (False Positive) | — | Model `finish_reason == "tool_calls"` while official is `"stop"` or `"others"`. |
-| `FN` (False Negative) | — | Model `finish_reason == "stop"` or `"others"` while official is `"tool_calls"`. |
-| `TN` (True Negative) | — | Both model & official have `finish_reason == "stop"` or `"others"`. |
-| `tool_call_precision` | `TP / (TP + FP)` | Proportion of triggered tool calls that should have been triggered. |
-| `tool_call_recall` | `TP / (TP + FN)` | Proportion of tool calls that should have been triggered and were. |
-| **`tool_call_f1`** | **`2*`tool_call_precision`*`tool_call_recall` / (`tool_call_precision`+`tool_call_recall`)`** | **Harmonic mean of precision and recall (primary metric for deployment check).** |
-
-
+| Label / Metric        | Formula                                                                                       | Meaning                                                                          |
+| --------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `TP` (True Positive)  | —                                                                                             | Both model & official have `finish_reason == "tool_calls"`.                      |
+| `FP` (False Positive) | —                                                                                             | Model `finish_reason == "tool_calls"` while official is `"stop"` or `"others"`.  |
+| `FN` (False Negative) | —                                                                                             | Model `finish_reason == "stop"` or `"others"` while official is `"tool_calls"`.  |
+| `TN` (True Negative)  | —                                                                                             | Both model & official have `finish_reason == "stop"` or `"others"`.              |
+| `tool_call_precision` | `TP / (TP + FP)`                                                                              | Proportion of triggered tool calls that should have been triggered.              |
+| `tool_call_recall`    | `TP / (TP + FN)`                                                                              | Proportion of tool calls that should have been triggered and were.               |
+| **`tool_call_f1`**    | **`2*`tool_call_precision`*`tool_call_recall` / (`tool_call_precision`+`tool_call_recall`)`** | **Harmonic mean of precision and recall (primary metric for deployment check).** |
 
 #### ToolCall-Schema Accuracy
+
 We use `schema_accuracy` to measure the robustness of the engineering.
 
-| Label / Metric | Formula / Condition | Description |
-| --- | --- | --- |
-| `count_finish_reason_tool_calls` | — | Number of responses with `finish_reason == "tool_calls"`. |
-| `count_successful_tool_call` | — | Number of **tool_calls** responses that passed schema validation. |
-| **`schema_accuracy`** | **`count_successful_tool_call / count_finish_reason_tool_calls`** | **Proportion of triggered tool calls whose JSON payload satisfies the schema.** |
+| Label / Metric                   | Formula / Condition                                               | Description                                                                     |
+| -------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `count_finish_reason_tool_calls` | —                                                                 | Number of responses with `finish_reason == "tool_calls"`.                       |
+| `count_successful_tool_call`     | —                                                                 | Number of **tool_calls** responses that passed schema validation.               |
+| **`schema_accuracy`**            | **`count_successful_tool_call / count_finish_reason_tool_calls`** | **Proportion of triggered tool calls whose JSON payload satisfies the schema.** |
 
 ## How we do the test
 
@@ -335,24 +341,25 @@ K2 vendors are periodically evaluated. If you are not on the list and would like
 
 ## Suggestions to Vendors
 
-1. **Use the Correct Versions**  
-Some vendors may not meet the requirements due to using incorrect versions. We recommend using the following versions and newer versions:
+1. **Use the Correct Versions**
+   Some vendors may not meet the requirements due to using incorrect versions. We recommend using the following versions and newer versions:
+
 - K2-0905:
-    - [vllm v0.11.0](https://github.com/vllm-project/vllm/releases/tag/v0.11.0)
-    - [sglang v0.5.3rc0](https://github.com/sgl-project/sglang/releases/tag/v0.5.3rc0)
-    - [moonshotai/Kimi-K2-Instruct-0905](https://huggingface.co/moonshotai/Kimi-K2-Instruct-0905) (commit: 94a4053eb8863059dd8afc00937f054e1365abbd)
-- K2-thinking: 
-    - [vllm v0.11.1rc6](https://github.com/vllm-project/vllm/releases/tag/v0.11.1rc6)
-    - [sglang v0.5.5.post2](https://github.com/sgl-project/sglang/releases/tag/v0.5.5.post2)
-    - [moonshotai/Kimi-K2-Thinking latest](https://huggingface.co/moonshotai/Kimi-K2-Thinking)
+  - [vllm v0.11.0](https://github.com/vllm-project/vllm/releases/tag/v0.11.0)
+  - [sglang v0.5.3rc0](https://github.com/sgl-project/sglang/releases/tag/v0.5.3rc0)
+  - [moonshotai/Kimi-K2-Instruct-0905](https://huggingface.co/moonshotai/Kimi-K2-Instruct-0905) (commit: 94a4053eb8863059dd8afc00937f054e1365abbd)
+- K2-thinking:
+  - [vllm v0.11.1rc6](https://github.com/vllm-project/vllm/releases/tag/v0.11.1rc6)
+  - [sglang v0.5.5.post2](https://github.com/sgl-project/sglang/releases/tag/v0.5.5.post2)
+  - [moonshotai/Kimi-K2-Thinking latest](https://huggingface.co/moonshotai/Kimi-K2-Thinking)
 
-2. **Rename Tool Call IDs**  
-The Kimi-K2 model expects all tool call IDs in historical messages to follow the format `functions.func_name:idx`. However, previous test cases may contain malformed tool IDs like `serach:0`*, which could mislead Kimi-K2 into generating incorrect tool call IDs, resulting in parsing failures.   
-In this version, we manually add the `functions.` prefix to all previous tool calls to make Kimi-K2 happy :). We recommend that users and vendors adopt this fix in practice as well.   
-This type of tool ID was generated by our official API. Before invoking the K2 model, our official API automatically renames all tool call IDs to the format `functions.func_name:idx`, so this is not an issue for us.
+2. **Rename Tool Call IDs**
+   The Kimi-K2 model expects all tool call IDs in historical messages to follow the format `functions.func_name:idx`. However, previous test cases may contain malformed tool IDs like `serach:0`\*, which could mislead Kimi-K2 into generating incorrect tool call IDs, resulting in parsing failures.
+   In this version, we manually add the `functions.` prefix to all previous tool calls to make Kimi-K2 happy :). We recommend that users and vendors adopt this fix in practice as well.
+   This type of tool ID was generated by our official API. Before invoking the K2 model, our official API automatically renames all tool call IDs to the format `functions.func_name:idx`, so this is not an issue for us.
 
-3. **Add Guided Encoding**  
-Large language models generate text token-by-token according to probability; they have no built-in mechanism to enforce a hard JSON schema. Even with careful prompting, the model may omit fields, add extra ones, or nest them incorrectly. So please add guided encoding to ensure the correct schema.
+3. **Add Guided Encoding**
+   Large language models generate text token-by-token according to probability; they have no built-in mechanism to enforce a hard JSON schema. Even with careful prompting, the model may omit fields, add extra ones, or nest them incorrectly. So please add guided encoding to ensure the correct schema.
 
 ## Verify by yourself
 
@@ -380,7 +387,6 @@ python tool_calls_eval.py samples.jsonl \
 - `--extra-body`: Extra JSON body as string to merge into each request payload (e.g., '{"temperature":0.6}')
 - `--incremental`: Incremental mode to only rerun failed requests
 
-
 For testing other providers via OpenRouter:
 
 ```bash
@@ -391,7 +397,9 @@ python tool_calls_eval.py samples.jsonl \
     --concurrency 5 \
     --extra-body '{"provider": {"only": ["YOUR_DESIGNATED_PROVIDER"]}}'
 ```
+
 ## Contact Us
+
 **We're preparing the next benchmark round and need your input.**
 
 If there's any **metric or test case** you care about, please drop a note in [issue](https://github.com/MoonshotAI/K2-Vendor-Verifier/issues/9)
@@ -399,4 +407,5 @@ If there's any **metric or test case** you care about, please drop a note in [is
 And welcome to drop the name of any vendor you’d like to see in in [issue](https://github.com/MoonshotAI/K2-Vendor-Verifier/issues/10)
 
 ---
+
 If you have any questions or concerns, please reach out to us at shijuanfeng@moonshot.cn.

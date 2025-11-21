@@ -17,7 +17,7 @@ import os
 import re
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import megfile
 from jsonschema import ValidationError, validate
@@ -44,7 +44,7 @@ TOOL_CALL_ARG_BEGIN = "<|tool_call_argument_begin|>"
 TOOL_CALL_END = "<|tool_call_end|>"
 
 
-def extract_tool_call_info(tool_call_rsp: str) -> List[Dict[str, Any]]:
+def extract_tool_call_info(tool_call_rsp: str) -> list[dict[str, Any]]:
     """
     Extract tool call information from raw text response.
 
@@ -85,18 +85,16 @@ def extract_tool_call_info(tool_call_rsp: str) -> List[Dict[str, Any]]:
             logger.warning(f"Unable to parse function_id: {function_id}")
             continue
 
-        tool_calls.append(
-            {
-                "id": function_id,
-                "type": "function",
-                "function": {"name": function_name, "arguments": function_args},
-            }
-        )
+        tool_calls.append({
+            "id": function_id,
+            "type": "function",
+            "function": {"name": function_name, "arguments": function_args},
+        })
 
     return tool_calls
 
 
-def compute_hash(obj: Dict[str, Any]) -> str:
+def compute_hash(obj: dict[str, Any]) -> str:
     """
     Compute stable hash of request object for incremental mode.
 
@@ -125,18 +123,18 @@ class ToolCallsValidator:
         self,
         model: str,
         base_url: str,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         concurrency: int = DEFAULT_CONCURRENCY,
         output_file: str = DEFAULT_OUTPUT_FILE,
         summary_file: str = DEFAULT_SUMMARY_FILE,
         timeout: int = DEFAULT_TIMEOUT,
         max_retries: int = DEFAULT_MAX_RETRIES,
-        extra_body: Optional[Dict[str, Any]] = None,
+        extra_body: dict[str, Any] | None = None,
         incremental: bool = False,
         use_raw_completions: bool = False,
-        tokenizer_model: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
+        tokenizer_model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ):
         """
         Initialize validator.
@@ -189,8 +187,8 @@ class ToolCallsValidator:
         self.use_raw_completions = use_raw_completions
         self.tokenizer_model = tokenizer_model
 
-        self.results: List[Dict[str, Any]] = []
-        self.finish_reason_stat: Dict[str, int] = {}
+        self.results: list[dict[str, Any]] = []
+        self.finish_reason_stat: dict[str, int] = {}
 
         # Initialize OpenAI client
         self.client = AsyncOpenAI(
@@ -252,7 +250,7 @@ class ToolCallsValidator:
             logger.warning(f"Error closing AsyncOpenAI client: {e}")
         return False
 
-    def prepare_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def prepare_request(self, request: dict[str, Any]) -> dict[str, Any]:
         """
         Preprocess request, set model and parameters.
 
@@ -294,7 +292,7 @@ class ToolCallsValidator:
 
         return req
 
-    def read_jsonl(self, file_path: str) -> List[Dict[str, Any]]:
+    def read_jsonl(self, file_path: str) -> list[dict[str, Any]]:
         """
         Read test set file in JSONL format.
 
@@ -321,14 +319,12 @@ class ToolCallsValidator:
                 try:
                     raw_req = json.loads(line)
                     prepared_req = self.prepare_request(raw_req)
-                    requests.append(
-                        {
-                            "data_index": line_num,
-                            "raw": raw_req,
-                            "prepared": prepared_req,
-                            "hash": compute_hash(prepared_req),
-                        }
-                    )
+                    requests.append({
+                        "data_index": line_num,
+                        "raw": raw_req,
+                        "prepared": prepared_req,
+                        "hash": compute_hash(prepared_req),
+                    })
                 except json.JSONDecodeError as e:
                     logger.error(f"JSON parse error at line {line_num}: {e}")
                 except Exception as e:
@@ -337,7 +333,7 @@ class ToolCallsValidator:
         logger.info(f"Successfully read {len(requests)} requests")
         return requests
 
-    def read_result_jsonl(self, file_path: str) -> List[Dict[str, Any]]:
+    def read_result_jsonl(self, file_path: str) -> list[dict[str, Any]]:
         """
         Read result file in JSONL format.
 
@@ -359,7 +355,7 @@ class ToolCallsValidator:
                     logger.error(f"Parse error at line {line_num} in result file: {e}")
         return results
 
-    async def send_request(self, request: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    async def send_request(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """
         Send API request (supports both stream and non-stream).
 
@@ -388,8 +384,8 @@ class ToolCallsValidator:
             return "failed", {"error": str(e)}
 
     async def _handle_stream_request(
-        self, request: Dict[str, Any]
-    ) -> Tuple[str, Dict[str, Any]]:
+        self, request: dict[str, Any]
+    ) -> tuple[str, dict[str, Any]]:
         """
         Handle stream request.
 
@@ -414,7 +410,7 @@ class ToolCallsValidator:
             request_id = None
             created = None
             full_content = []
-            tool_calls: Dict[int, Dict[str, Any]] = {}
+            tool_calls: dict[int, dict[str, Any]] = {}
             finish_reason = None
             usage = None
 
@@ -460,7 +456,7 @@ class ToolCallsValidator:
             if self.use_raw_completions:
                 extracted_tool_calls = extract_tool_call_info(content_text)
                 if extracted_tool_calls:
-                    tool_calls = {i: tc for i, tc in enumerate(extracted_tool_calls)}
+                    tool_calls = dict(enumerate(extracted_tool_calls))
                     finish_reason = "tool_calls"
 
             # Convert tool_calls to list
@@ -491,7 +487,7 @@ class ToolCallsValidator:
             return "failed", {"error": str(e)}
 
     def _accumulate_tool_calls(
-        self, delta_tool_calls: List[Any], tool_calls: Dict[int, Dict[str, Any]]
+        self, delta_tool_calls: list[Any], tool_calls: dict[int, dict[str, Any]]
     ) -> None:
         """
         Accumulate tool call information from stream response.
@@ -519,8 +515,8 @@ class ToolCallsValidator:
                     tool_calls[idx]["function"]["arguments"] += tc.function.arguments
 
     async def process_request(
-        self, prepared_req: Dict[str, Any], data_index: int
-    ) -> Dict[str, Any]:
+        self, prepared_req: dict[str, Any], data_index: int
+    ) -> dict[str, Any]:
         """
         Process a single request, record duration and status.
 
@@ -567,7 +563,7 @@ class ToolCallsValidator:
             return result
 
     def validate_tool_call(
-        self, tool_call: Dict[str, Any], tools: List[Dict[str, Any]]
+        self, tool_call: dict[str, Any], tools: list[dict[str, Any]]
     ) -> bool:
         """
         Validate tool call arguments against JSON Schema.
@@ -649,7 +645,7 @@ class ToolCallsValidator:
         else:
             # Non-incremental mode: clear output file with lock protection
             async with self.file_lock:
-                with megfile.smart_open(self.output_file, "w", encoding="utf-8") as f:
+                with megfile.smart_open(self.output_file, "w", encoding="utf-8"):
                     pass
             logger.info(f"Initialized output file: {self.output_file}")
 
@@ -707,7 +703,7 @@ class ToolCallsValidator:
         logger.info(f"Results saved to: {self.output_file}")
         logger.info(f"Summary saved to: {self.summary_file}")
 
-    async def save_result_and_update_stats(self, result: Dict[str, Any]) -> None:
+    async def save_result_and_update_stats(self, result: dict[str, Any]) -> None:
         """
         Save single result to file and update statistics in real-time.
 
@@ -747,10 +743,12 @@ class ToolCallsValidator:
             logger.info("No results to process")
             return
 
-        logger.info(f"Processing {len(all_results)} results for deduplication and sorting")
+        logger.info(
+            f"Processing {len(all_results)} results for deduplication and sorting"
+        )
 
         # Group by data_index and keep the latest one for each index
-        results_by_index: Dict[int, Dict[str, Any]] = {}
+        results_by_index: dict[int, dict[str, Any]] = {}
         for result in all_results:
             data_index = result.get("data_index")
             if data_index is None:
@@ -797,7 +795,7 @@ class ToolCallsValidator:
         with megfile.smart_open(self.summary_file, "w", encoding="utf-8") as f:
             json.dump(summary, f, ensure_ascii=False, indent=4)
 
-    def compute_summary(self) -> Dict[str, Any]:
+    def compute_summary(self) -> dict[str, Any]:
         """
         Compute summary statistics from results list (backward compatibility).
 
@@ -945,7 +943,7 @@ async def main() -> None:
     parser.add_argument(
         "--tokenizer-model",
         type=str,
-        help=f"Tokenizer model name for raw completions",
+        help="Tokenizer model name for raw completions",
     )
 
     args = parser.parse_args()

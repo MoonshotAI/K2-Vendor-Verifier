@@ -7,6 +7,16 @@ __pycache__/
 # C extensions
 *.so
 
+# Ignore external tool call prompts (downloadable from links in README)
+tool-calls.tar.gz
+tool-calls/
+
+*.jsonl
+*.json
+
+# Ignore local run script with site-specific testing metadata
+run.sh
+
 # Distribution / packaging
 .Python
 build/
