@@ -27,6 +27,13 @@ from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm_asyncio
 from transformers import AutoTokenizer
 
+from .models import (
+    FunctionCall,
+    SummaryStatistics,
+    ToolCall,
+    ValidationResult,
+)
+
 DEFAULT_CONCURRENCY = 5
 DEFAULT_TIMEOUT = 600
 DEFAULT_MAX_RETRIES = 3
@@ -45,7 +52,7 @@ TOOL_CALL_ARG_BEGIN = "<|tool_call_argument_begin|>"
 TOOL_CALL_END = "<|tool_call_end|>"
 
 
-def extract_tool_call_info(tool_call_rsp: str) -> list[dict[str, Any]]:
+def extract_tool_call_info(tool_call_rsp: str) -> list[ToolCall]:
     """
     Extract tool call information from raw text response.
 
@@ -86,11 +93,13 @@ def extract_tool_call_info(tool_call_rsp: str) -> list[dict[str, Any]]:
             logger.warning(f"Unable to parse function_id: {function_id}")
             continue
 
-        tool_calls.append({
-            "id": function_id,
-            "type": "function",
-            "function": {"name": function_name, "arguments": function_args},
-        })
+        tool_calls.append(
+            ToolCall(
+                id=function_id,
+                type="function",
+                function=FunctionCall(name=function_name, arguments=function_args),
+            )
+        )
 
     return tool_calls
 
@@ -188,7 +197,7 @@ class ToolCallsValidator:
         self.use_raw_completions = use_raw_completions
         self.tokenizer_model = tokenizer_model
 
-        self.results: list[dict[str, Any]] = []
+        self.results: list[ValidationResult] = []
         self.finish_reason_stat: dict[str, int] = {}
 
         # Initialize OpenAI client
@@ -469,11 +478,15 @@ class ToolCallsValidator:
             if self.use_raw_completions:
                 extracted_tool_calls = extract_tool_call_info(content_text)
                 if extracted_tool_calls:
-                    tool_calls = dict(enumerate(extracted_tool_calls))
+                    tool_calls = {
+                        i: tc.__dict__ for i, tc in enumerate(extracted_tool_calls)
+                    }
                     finish_reason = "tool_calls"
 
-            # Convert tool_calls to list
-            tool_calls_list = list(tool_calls.values()) if tool_calls else None
+            # Convert tool_calls to list of dicts for response format
+            tool_calls_list = (
+                [tc.__dict__ for tc in tool_calls.values()] if tool_calls else None
+            )
 
             # Construct response
             response = {
@@ -529,7 +542,7 @@ class ToolCallsValidator:
 
     async def process_request(
         self, prepared_req: dict[str, Any], data_index: int
-    ) -> dict[str, Any]:
+    ) -> ValidationResult:
         """
         Process a single request, record duration and status.
 
@@ -545,8 +558,8 @@ class ToolCallsValidator:
             status, response = await self.send_request(prepared_req["prepared"])
             duration_ms = int((time.time() - start_time) * 1000)
 
-            finish_reason = None
-            tool_calls_valid = None
+            finish_reason: str | None = None
+            tool_calls_valid: bool | None = None
 
             # Extract finish_reason and validate tool calls
             if response and "choices" in response and response["choices"]:
@@ -562,18 +575,17 @@ class ToolCallsValidator:
                             self.validate_tool_call(tc, tools) for tc in tool_calls
                         )
 
-            result = {
-                "data_index": data_index,
-                "request": prepared_req["prepared"],
-                "response": response,
-                "status": status,
-                "finish_reason": finish_reason,
-                "tool_calls_valid": tool_calls_valid,
-                "last_run_at": datetime.now().isoformat(),
-                "duration_ms": duration_ms,
-                "hash": prepared_req["hash"],
-            }
-            return result
+            return ValidationResult(
+                data_index=data_index,
+                request=prepared_req["prepared"],
+                response=response,
+                status=status,
+                finish_reason=finish_reason,
+                tool_calls_valid=tool_calls_valid,
+                last_run_at=datetime.now().isoformat(),
+                duration_ms=duration_ms,
+                hash=prepared_req["hash"],
+            )
 
     def validate_tool_call(
         self, tool_call: dict[str, Any], tools: list[dict[str, Any]]
@@ -676,8 +688,20 @@ class ToolCallsValidator:
             # Incremental mode: skip successful requests
             if self.incremental and h in existing_hash_map:
                 r = existing_hash_map[h]
-                if r.get("status") == "success":
-                    self.results.append(r)
+                if isinstance(r, dict) and r.get("status") == "success":
+                    # Convert dict to ValidationResult for consistency
+                    validation_result = ValidationResult(
+                        data_index=r.get("data_index", 0),
+                        request=r.get("request", {}),
+                        response=r.get("response"),
+                        status=r.get("status", ""),
+                        finish_reason=r.get("finish_reason"),
+                        tool_calls_valid=r.get("tool_calls_valid"),
+                        last_run_at=r.get("last_run_at", ""),
+                        duration_ms=r.get("duration_ms", 0),
+                        hash=r.get("hash", ""),
+                    )
+                    self.results.append(validation_result)
                     continue
 
             tasks.append(self.process_request(req, data_index))
@@ -694,10 +718,11 @@ class ToolCallsValidator:
                 try:
                     res = await task
                     # Update statistics
-                    finish_reason = res.get("finish_reason")
-                    self.finish_reason_stat[finish_reason] = (
-                        self.finish_reason_stat.get(finish_reason, 0) + 1
-                    )
+                    finish_reason = res.finish_reason
+                    if finish_reason is not None:
+                        self.finish_reason_stat[finish_reason] = (
+                            self.finish_reason_stat.get(finish_reason, 0) + 1
+                        )
 
                     self.results.append(res)
                     # Save result immediately and update stats
@@ -716,7 +741,7 @@ class ToolCallsValidator:
         logger.info(f"Results saved to: {self.output_file}")
         logger.info(f"Summary saved to: {self.summary_file}")
 
-    async def save_result_and_update_stats(self, result: dict[str, Any]) -> None:
+    async def save_result_and_update_stats(self, result: ValidationResult) -> None:
         """
         Save single result to file and update statistics in real-time.
 
@@ -732,13 +757,13 @@ class ToolCallsValidator:
         async with self.stats_lock:
             summary = self.compute_summary()
             logger.info(
-                f"[Stats] Total: {summary['success_count'] + summary['failure_count']}, "
-                f"Success: {summary['success_count']}, "
-                f"Failed: {summary['failure_count']}, "
-                f"Stop: {summary['finish_stop']}, "
-                f"ToolCalls: {summary['finish_tool_calls']}, "
-                f"ToolCallValid: {summary['successful_tool_call_count']}, "
-                f"ToolCallInvalid: {summary['schema_validation_error_count']}"
+                f"[Stats] Total: {summary.success_count + summary.failure_count}, "
+                f"Success: {summary.success_count}, "
+                f"Failed: {summary.failure_count}, "
+                f"Stop: {summary.finish_stop}, "
+                f"ToolCalls: {summary.finish_tool_calls}, "
+                f"ToolCallValid: {summary.successful_tool_call_count}, "
+                f"ToolCallInvalid: {summary.schema_validation_error_count}"
             )
 
     async def deduplicate_and_sort_results(self) -> None:
@@ -761,14 +786,23 @@ class ToolCallsValidator:
         )
 
         # Group by data_index and keep the latest one for each index
-        results_by_index: dict[int, dict[str, Any]] = {}
-        for result in all_results:
-            data_index = result.get("data_index")
-            if data_index is None:
-                logger.warning(f"Result missing data_index: {result}")
-                continue
+        results_by_index: dict[int, ValidationResult] = {}
+        for result_dict in all_results:
+            # Convert dict to ValidationResult
+            result = ValidationResult(
+                data_index=result_dict.get("data_index", 0),
+                request=result_dict.get("request", {}),
+                response=result_dict.get("response"),
+                status=result_dict.get("status", ""),
+                finish_reason=result_dict.get("finish_reason"),
+                tool_calls_valid=result_dict.get("tool_calls_valid"),
+                last_run_at=result_dict.get("last_run_at", ""),
+                duration_ms=result_dict.get("duration_ms", 0),
+                hash=result_dict.get("hash", ""),
+            )
 
-            last_run_at = result.get("last_run_at")
+            data_index = result.data_index
+            last_run_at = result.last_run_at
             if last_run_at is None:
                 logger.warning(f"Result missing last_run_at: {result}")
                 continue
@@ -777,13 +811,13 @@ class ToolCallsValidator:
             if data_index not in results_by_index:
                 results_by_index[data_index] = result
             else:
-                existing_last_run = results_by_index[data_index].get("last_run_at")
+                existing_last_run = results_by_index[data_index].last_run_at
                 if existing_last_run is None or last_run_at > existing_last_run:
                     results_by_index[data_index] = result
 
         # Convert to list and sort by data_index
         deduplicated_results = list(results_by_index.values())
-        deduplicated_results.sort(key=lambda x: x.get("data_index", 0))
+        deduplicated_results.sort(key=lambda x: x.data_index)
 
         logger.info(
             f"Deduplicated from {len(all_results)} to {len(deduplicated_results)} results"
@@ -796,7 +830,7 @@ class ToolCallsValidator:
                     f.write(json.dumps(result, ensure_ascii=False) + "\n")
 
         # Update self.results
-        self.results = deduplicated_results
+        self.results = deduplicated_results  # This is already List[ValidationResult]
 
         logger.info(f"Results deduplicated, sorted, and saved to: {self.output_file}")
 
@@ -808,47 +842,37 @@ class ToolCallsValidator:
         with megfile.smart_open(self.summary_file, "w", encoding="utf-8") as f:
             json.dump(summary, f, ensure_ascii=False, indent=4)
 
-    def compute_summary(self) -> dict[str, Any]:
+    def compute_summary(self) -> SummaryStatistics:
         """
-        Compute summary statistics from results list (backward compatibility).
+        Compute summary statistics from results list.
 
         Returns:
-            Summary dictionary
+            Summary statistics
         """
-        summary = {
-            "model": self.model,
-            "success_count": 0,
-            "failure_count": 0,
-            "finish_stop": 0,
-            "finish_tool_calls": 0,
-            "finish_others": 0,
-            "finish_others_detail": {},
-            "schema_validation_error_count": 0,
-            "successful_tool_call_count": 0,
-        }
+        summary = SummaryStatistics(model=self.model)
 
         for r in self.results:
-            status = r.get("status")
-            finish_reason = r.get("finish_reason")
-            tool_calls_valid = r.get("tool_calls_valid")
+            status = r.status
+            finish_reason = r.finish_reason
+            tool_calls_valid = r.tool_calls_valid
 
             if status == "success":
-                summary["success_count"] += 1
+                summary.success_count += 1
             else:
-                summary["failure_count"] += 1
+                summary.failure_count += 1
 
             if finish_reason == "stop":
-                summary["finish_stop"] += 1
+                summary.finish_stop += 1
             elif finish_reason == "tool_calls":
-                summary["finish_tool_calls"] += 1
+                summary.finish_tool_calls += 1
                 if tool_calls_valid:
-                    summary["successful_tool_call_count"] += 1
+                    summary.successful_tool_call_count += 1
                 else:
-                    summary["schema_validation_error_count"] += 1
+                    summary.schema_validation_error_count += 1
             elif finish_reason:
-                summary["finish_others"] += 1
-                summary["finish_others_detail"].setdefault(finish_reason, 0)
-                summary["finish_others_detail"][finish_reason] += 1
+                summary.finish_others += 1
+                summary.finish_others_detail.setdefault(finish_reason, 0)
+                summary.finish_others_detail[finish_reason] += 1
 
         self.summary = summary
         return summary

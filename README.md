@@ -4,6 +4,14 @@
 
 This is a proper modern refactor, feature extension, style improvement, and usability improvement of the original/underlying K2 Tool Call Verifier system.
 
+### Usage
+
+```bash
+uv sync -U
+
+uv run k2vv --help
+```
+
 ## What's K2VV
 
 Since the release of the Kimi K2 model, we have received numerous feedback on the precision of Kimi K2 in toolcall. Given that K2 focuses on the agentic loop, the reliability of toolcall is of utmost importance.

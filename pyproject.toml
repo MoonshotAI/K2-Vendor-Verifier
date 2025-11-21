@@ -72,7 +72,31 @@ ignore = [
 #    "C901",  # too complex
 ]
 
+[tool.mypy]
+python_version = "3.14"
+warn_return_any = true
+warn_unused_configs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+# Ignore missing imports for external libraries without stubs
+[[tool.mypy.overrides]]
+module = [
+    "megfile.*",
+    "jsonschema.*",
+    "tqdm.*",
+    "transformers.*",
+]
+ignore_missing_imports = true
+
 [dependency-groups]
 dev = [
     "mypy>=1.18.2",
+    "types-jsonschema>=4.25.1.20251009",
+    "types-tqdm>=4.67.0.20250809",
 ]

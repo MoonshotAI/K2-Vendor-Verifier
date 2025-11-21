@@ -6,8 +6,10 @@ Provides a clean entry point for running the tool calls validation tool.
 
 import argparse
 import asyncio
+import json
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 from .tool_calls_eval import ToolCallsValidator
 
@@ -123,15 +125,17 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_extra_body(extra_body_str: str | None) -> dict | None:
+def parse_extra_body(extra_body_str: str | None) -> dict[str, Any] | None:
     """Parse extra body JSON string into dictionary."""
     if not extra_body_str:
         return None
 
     try:
-        import json
-
-        return json.loads(extra_body_str)
+        result = json.loads(extra_body_str)
+        if not isinstance(result, dict):
+            print("Error: extra-body must be a JSON object", file=sys.stderr)
+            sys.exit(1)
+        return cast(dict[str, Any], result)
     except json.JSONDecodeError as e:
         print(f"Error parsing extra-body JSON: {e}", file=sys.stderr)
         sys.exit(1)
