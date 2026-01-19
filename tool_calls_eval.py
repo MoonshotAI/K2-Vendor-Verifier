@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 import megfile
-from h2.exceptions import H2Error
 from httpcore import ConnectError as HttpcoreConnectError
 from httpcore import ConnectTimeout as HttpcoreConnectTimeout
 from httpcore import ReadError as HttpcoreReadError
@@ -52,12 +51,8 @@ TOOL_CALL_END = "<|tool_call_end|>"
 
 
 RETRYABLE_READ_ERRORS = (
-    HttpcoreConnectError,
-    HttpcoreConnectTimeout,
     HttpcoreReadError,
     RemoteProtocolError,
-    httpx.ConnectError,
-    httpx.ConnectTimeout,
     httpx.ReadError,
     httpx.RemoteProtocolError,
 )
@@ -75,9 +70,6 @@ def _is_retryable_exception(e: BaseException) -> bool:
         return True
     if isinstance(e, APIStatusError):
         return getattr(e, "status_code", None) == 429
-    # HTTP/2 state/protocol errors from 'h2' can surface without being wrapped by httpx/httpcore.
-    if isinstance(e, H2Error):
-        return True
     if isinstance(e, (APIConnectionError, APITimeoutError, *RETRYABLE_READ_ERRORS)):
         return True
     return False
@@ -222,7 +214,6 @@ class ToolCallsValidator:
         self.eval_finished_at: Optional[str] = None
 
         self.http_client = httpx.AsyncClient(
-            http2=True,
             timeout=HTTPX_STREAM_TIMEOUT,
             limits=httpx.Limits(
                 max_connections=concurrency * 2,
@@ -572,6 +563,7 @@ class ToolCallsValidator:
         result = {
             "data_index": data_index,
             "request": prepared_req["prepared"],
+            "extra_body": self.extra_body,
             "response": response,
             "status": status,
             "finish_reason": finish_reason,
