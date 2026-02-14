@@ -145,14 +145,6 @@ We hope K2VV can help ensuring that everyone can access a consistent and high-pe
       <td>3037</td>
       <td>83.05%</td>
     </tr>
-    <tr>
-      <td><a href="https://openrouter.ai/provider/fireworks">Fireworks</a></td>
-      <td>https://openrouter.ai</td>
-      <td>67.38%</td>
-      <td>1494</td>
-      <td>1494</td>
-      <td>100.00%</td>
-    </tr>
   </tbody>
 </table>
 
