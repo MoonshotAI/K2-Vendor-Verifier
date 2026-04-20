@@ -401,6 +401,19 @@ python tool_calls_eval.py samples.jsonl \
     --extra-body '{"chat_template_kwargs": {"thinking": false}, "temperature": 0.6}'
 ```
 
+### Compute F1 Score
+
+After running the evaluation, you can compute the `tool_call_f1` score by comparing your results against a ground-truth file:
+
+```bash
+python f1_score.py ground_truth.jsonl results.jsonl
+```
+
+- `ground_truth.jsonl`: Path to the ground-truth results JSONL file
+- `results.jsonl`: Path to your test results JSONL file
+
+Requests are matched by `data_index`. The output includes TP/FP/FN/TN counts along with precision, recall, and F1 score.
+
 ## Contact Us
 **We're preparing the next benchmark round and need your input.**
 
